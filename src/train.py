@@ -32,12 +32,20 @@ class CipherPlainData(Dataset):
         cipher_ids = [int(x) for x in data["ciphertext"].split()]
         plain_ids = [self.char_to_id.get(c, 0) + self.char_offset for c in data["plaintext"]]
 
-        # Safety measure to ensure we don't truncate away all the plaintext
+        # 1. Safely truncate plain_ids first if it's absurdly long
+        max_plain_len = cfg.max_context - 2
+        if len(plain_ids) > max_plain_len:
+            plain_ids = plain_ids[:max_plain_len]
+
+        # 2. Now max_cipher_len is guaranteed to be >= 1
         max_cipher_len = cfg.max_context - len(plain_ids) - 1 
         if len(cipher_ids) > max_cipher_len:
             cipher_ids = cipher_ids[:max_cipher_len]
 
         full_seq = cipher_ids + [self.sep_token] + plain_ids
+        
+        # 3. Final safety net
+        full_seq = full_seq[:cfg.max_context]
         
         labels = full_seq.copy()
         padding_length = cfg.max_context - len(full_seq)
