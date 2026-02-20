@@ -14,6 +14,9 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 class CipherPlainData(Dataset):
     def __init__(self, directory_path):
         self.file_paths = glob.glob(os.path.join(directory_path, "*.json"))
+
+        if not self.file_paths:
+            raise ValueError(f"No .json files found in {os.path.abspath(directory_path)}. Did you upload the data?")
         
         # 1. Dynamically find the max homophone ID if not in Config
         # Or just use Config.unique_homophones if you're sure it's the max
