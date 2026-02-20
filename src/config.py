@@ -4,6 +4,8 @@ TEXT_LEN = 8_192
 UNIQUE_HOMOPHONE_COUNT = 8192
 UNIQUE_LETTER_COUNT = 30
 TOTAL_SEQ = TEXT_LEN * 2
+BUFFER = 10
+DATA_DIR = "./data/train"
 OUTPUT_DIR = "./outputs"
 
 @dataclass
@@ -12,7 +14,7 @@ class Config:
     unique_homophones: int = UNIQUE_HOMOPHONE_COUNT
     unique_letters: int = UNIQUE_LETTER_COUNT
     vocab_size: int = unique_homophones + unique_letters + 5
-    max_context: int = TOTAL_SEQ
+    max_context: int = TOTAL_SEQ + BUFFER
     dims: int = 384
     layers: int = 16
     att_heads: int = 6
@@ -24,10 +26,11 @@ class Config:
     epochs: int = 1
     grad_checkpoint: bool = True
     log_steps: int = 10
-    save_steps: int = 500 # Fixed missing type hint
+    save_steps: int = 500
 
     # SYSTEM
-    output_dir: str = OUTPUT_DIR # Fixed missing type hint
+    output_dir: str = OUTPUT_DIR
+    data_dir: str = DATA_DIR
 
 # Instantiate to use across other files
 cfg = Config()

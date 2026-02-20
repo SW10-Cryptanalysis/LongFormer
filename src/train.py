@@ -80,7 +80,7 @@ def train():
     trainer = Trainer(
         model=model,
         args=args,
-        train_dataset=CipherPlainData(directory_path="./data/train"),
+        train_dataset=CipherPlainData(directory_path=cfg.data_dir),
     )
 
     print(f"Training on {torch.cuda.get_device_name(0)}...")
