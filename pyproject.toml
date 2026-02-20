@@ -10,7 +10,22 @@ dependencies = [
     "transformers>=5.2.0",
 ]
 
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["test"]
+addopts = "-v --tb=short --cov=src --cov-report=term-missing"
+
+[tool.coverage.report]
+exclude_also = [
+	"if 0:",
+    "if __name__ == .__main__.:",
+	"import",
+	"from",
+]
+
 [dependency-groups]
 dev = [
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
     "ruff>=0.15.2",
 ]
