@@ -28,6 +28,9 @@ class CipherPlainData(Dataset):
         self.chars = "abcdefghijklmnopqrstuvwxyz " # Add whatever chars you expect
         self.char_to_id = {char: i for i, char in enumerate(self.chars)}
 
+    def __len__(self):
+        return len(self.file_paths)
+
     def __getitem__(self, idx):
         with open(self.file_paths[idx], 'r') as f:
             data = json.load(f)
