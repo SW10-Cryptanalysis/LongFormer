@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 TEXT_LEN = 8_192
 UNIQUE_HOMOPHONE_COUNT = 500
-UNIQUE_LETTER_COUNT = 26
+UNIQUE_LETTER_COUNT = 30
 TOTAL_SEQ = TEXT_LEN * 2
 OUTPUT_DIR = "./outputs"
 
@@ -14,8 +14,9 @@ class Config:
 
     # Vocab needs to be larger than unique homophone count + unique letter count + 1 (start/end/padding)
     unique_homophones: int = UNIQUE_HOMOPHONE_COUNT
-    unique_letters: int = UNIQUE_LETTER_COUNT
-    vocab_size: int = unique_homophones + unique_letters + 1
+    unique_letters: int = UNIQUE_LETTER_COUNT # Increased to cover 27 chars + specials safely
+    vocab_size: int = unique_homophones + unique_letters + 5
+
     # Input is ciphertext + plaintext
     max_context: int = TOTAL_SEQ
     dims: int = 384

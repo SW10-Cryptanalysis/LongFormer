@@ -19,14 +19,7 @@ export HF_HUB_ENABLE_HF_TRANSFER=1
 
 echo "Job started on $(hostname) at $(date)" | tee logs/train_live_${SLURM_JOB_ID}.log
 
-echo "Detecting GPU with most free VRAM..." | tee -a logs/train_live_${SLURM_JOB_ID}.log
-
-GPU=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits \
-              | nl -v0 | sort -k2 -nr | head -n1 | awk '{print $1}')
-
-export CUDA_VISIBLE_DEVICES=$GPU
-
-echo "Selected GPU: $GPU" | tee -a logs/train_live_${SLURM_JOB_ID}.log
+# Usage of specific GPU selection removed to rely on Slurm or env vars
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES" | tee -a logs/train_live_${SLURM_JOB_ID}.log
 nvidia-smi | tee -a logs/train_live_${SLURM_JOB_ID}.log
 
