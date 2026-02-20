@@ -1,17 +1,19 @@
- 
-import torch
 import torch.nn as nn
-from transformers import LongformerConfig, LongformerModel
+from transformers import LongformerConfig, LongformerModel, LongformerPreTrainedModel
 from transformers.modeling_outputs import CausalLMOutput
 from config import cfg
 
-
-class LongformerForCausalLM(nn.Module):
+# Inherit from LongformerPreTrainedModel instead of nn.Module
+class LongformerForCausalLM(LongformerPreTrainedModel):
     def __init__(self, config):
-        super().__init__()
-        self.config = config
+        # Pass the config to the parent class
+        super().__init__(config) 
+        
         self.longformer = LongformerModel(config)
-        self.lm_head = nn.Linear(config.hidden_size, self.config.vocab_size, bias=False)
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        
+        # HuggingFace utility to initialize weights properly
+        self.post_init()
 
     def forward(
         self,
@@ -43,20 +45,6 @@ class LongformerForCausalLM(nn.Module):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
-    
-    # Required for HuggingFace Trainer to save/load cleanly
-    def save_pretrained(self, save_directory):
-        self.config.save_pretrained(save_directory)
-        torch.save(self.state_dict(), f"{save_directory}/pytorch_model.bin")
-
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
-        # Basic implementation to load config, then weights
-        # (omitted full logic for brevity, assuming standard usage here)
-        config = LongformerConfig.from_pretrained(pretrained_model_name_or_path)
-        model = cls(config)
-        # In a real scenario, you'd load state_dict here
-        return model
     
     def num_parameters(self):
         return sum(p.numel() for p in self.parameters())
