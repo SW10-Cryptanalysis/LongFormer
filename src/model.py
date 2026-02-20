@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from transformers import LongformerConfig, LongformerModel
 from transformers.modeling_outputs import CausalLMOutput
-from config import Config
+from config import cfg
 
 
 class LongformerForCausalLM(nn.Module):
@@ -11,7 +11,7 @@ class LongformerForCausalLM(nn.Module):
         super().__init__()
         self.config = config
         self.longformer = LongformerModel(config)
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.lm_head = nn.Linear(config.hidden_size, self.config.vocab_size, bias=False)
 
     def forward(
         self,
@@ -68,24 +68,22 @@ class LongformerForCausalLM(nn.Module):
 
 def get_model():
     """Init model with params from config"""
-
     conf = LongformerConfig(
-        vocab_size=Config.vocab_size,
-        max_position_embeddings=Config.max_context,
-        hidden_size=Config.dims,
-        num_hidden_layers=Config.layers,
-        intermediate_size=Config.dims * 4,
-        num_attention_heads=Config.att_heads,
-        attention_window=[512] * Config.layers,
-        # Standard stuff
+        vocab_size=cfg.vocab_size,
+        max_position_embeddings=cfg.max_context,
+        hidden_size=cfg.dims,
+        num_hidden_layers=cfg.layers,
+        intermediate_size=cfg.dims * 4,
+        num_attention_heads=cfg.att_heads,
+        attention_window=[512] * cfg.layers,
         hidden_act="silu",
         initializer_range=0.02,
         layer_norm_eps=1e-5,
+        is_decoder=True, # Ensures causal masking
     )
 
     model = LongformerForCausalLM(conf)
     print("Longformer Model loaded!")
-
     print(f"Parameters:       {model.num_parameters():,}")
     print(f"VRAM for Weights: {(model.get_memory_footprint() / 1e9):.4f} GB")
 
