@@ -45,6 +45,8 @@ class CipherPlainData(Dataset):
         input_ids = full_seq + [0] * padding_length
         labels = labels + [-100] * padding_length
         attention_mask = [1] * len(full_seq) + [0] * padding_length
+        
+        assert max(input_ids) < cfg.vocab_size, f"Found token ID {max(input_ids)} but vocab size is {cfg.vocab_size}"
 
         return {
             "input_ids": torch.tensor(input_ids, dtype=torch.long),

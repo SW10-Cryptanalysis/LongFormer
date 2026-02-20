@@ -3,7 +3,6 @@ from transformers import LongformerConfig, LongformerModel, LongformerPreTrained
 from transformers.modeling_outputs import CausalLMOutput
 from config import cfg
 
-# Inherit from LongformerPreTrainedModel instead of nn.Module
 class LongformerForCausalLM(LongformerPreTrainedModel):
     def __init__(self, config):
         # Pass the config to the parent class
@@ -45,13 +44,6 @@ class LongformerForCausalLM(LongformerPreTrainedModel):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
-    
-    def num_parameters(self):
-        return sum(p.numel() for p in self.parameters())
-    
-    def get_memory_footprint(self):
-        # Approximate
-        return sum(p.numel() * p.element_size() for p in self.parameters())
 
 
 def get_model():
