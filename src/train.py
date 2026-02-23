@@ -74,6 +74,8 @@ def train():
         gradient_checkpointing=cfg.grad_checkpoint,
         logging_steps=cfg.log_steps,
         save_steps=cfg.save_steps,
+        eval_strategy="steps",
+        eval_steps=cfg.eval_steps,
         bf16=True,
     )
 
@@ -81,6 +83,7 @@ def train():
         model=model,
         args=args,
         train_dataset=CipherPlainData(directory_path=cfg.data_dir),
+        eval_dataset=CipherPlainData(directory_path=cfg.eval_dir),
     )
 
     print(f"Training on {torch.cuda.get_device_name(0)}...")

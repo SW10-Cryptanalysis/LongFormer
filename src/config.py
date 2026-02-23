@@ -6,6 +6,7 @@ UNIQUE_LETTER_COUNT = 30
 TOTAL_SEQ = TEXT_LEN * 2
 BUFFER = 10
 DATA_DIR = "./data/train"
+EVAL_DIR = "./data/eval"
 OUTPUT_DIR = "./outputs"
 
 @dataclass
@@ -26,11 +27,13 @@ class Config:
     epochs: int = 1
     grad_checkpoint: bool = True
     log_steps: int = 10
-    save_steps: int = 500
+    save_steps: int = 20
+    eval_steps: int = 20
 
     # SYSTEM
     output_dir: str = OUTPUT_DIR
     data_dir: str = DATA_DIR
+    eval_dir: str = EVAL_DIR
 
 # Instantiate to use across other files
 cfg = Config()
