@@ -85,7 +85,17 @@ def train():
 
     print(f"Training on {torch.cuda.get_device_name(0)}...")
 
-    trainer.train()
+    # Check if there is a checkpoint to resume from
+    last_checkpoint = None
+    if os.path.isdir(cfg.output_dir):
+        checkpoints = [d for d in os.listdir(cfg.output_dir) if d.startswith("checkpoint-")]
+        if checkpoints:
+            # Sort by number to get the latest (e.g. checkpoint-500, checkpoint-1000)
+            checkpoints.sort(key=lambda x: int(x.split('-')[1]))
+            last_checkpoint = os.path.join(cfg.output_dir, checkpoints[-1])
+            print(f"Resuming from checkpoint: {last_checkpoint}")
+
+    trainer.train(resume_from_checkpoint=last_checkpoint)
 
     trainer.save_model(f"{cfg.output_dir}/model")
 
