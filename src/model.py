@@ -50,7 +50,8 @@ def get_model():
     """Init model with params from config"""
     conf = LongformerConfig(
         vocab_size=cfg.vocab_size,
-        max_position_embeddings=cfg.max_context,
+        max_position_embeddings=cfg.max_context + 2, # +2 for safety buffer
+        pad_token_id=0,
         hidden_size=cfg.dims,
         num_hidden_layers=cfg.layers,
         intermediate_size=cfg.dims * 4,
