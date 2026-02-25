@@ -76,7 +76,8 @@ def train():
         eval_strategy="steps",
         eval_steps=cfg.eval_steps,
         bf16=True,
-        ddp_find_unused_parameters=True, 
+        ddp_find_unused_parameters=True,
+        dataloader_num_workers=8,
     )
     
     def custom_collator(features):
