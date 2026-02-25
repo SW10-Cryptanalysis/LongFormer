@@ -66,9 +66,10 @@ def train():
     model = get_model()
 
     args = TrainingArguments(
-        output_dir=cfg.output_dir,
+        output_dir=str(cfg.output_dir),
         num_train_epochs=cfg.epochs,
         per_device_train_batch_size=cfg.batch_size,
+        per_device_eval_batch_size=cfg.batch_size,
         gradient_accumulation_steps=cfg.grad_accum,
         learning_rate=cfg.learning_rate,
         gradient_checkpointing=cfg.grad_checkpoint,
@@ -83,7 +84,7 @@ def train():
         model=model,
         args=args,
         train_dataset=CipherPlainData(directory_path=cfg.data_dir),
-        eval_dataset=CipherPlainData(directory_path=cfg.eval_dir),
+        eval_dataset=CipherPlainData(directory_path=cfg.test_dir),
     )
 
     print(f"Training on {torch.cuda.get_device_name(0)}...")

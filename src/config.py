@@ -1,13 +1,13 @@
 from dataclasses import dataclass
+from pathlib import Path
 
 TEXT_LEN = 8_192
 UNIQUE_HOMOPHONE_COUNT = 8192
 UNIQUE_LETTER_COUNT = 30
 TOTAL_SEQ = TEXT_LEN * 2
 BUFFER = 10
-DATA_DIR = "./data/train"
-EVAL_DIR = "./data/eval"
-OUTPUT_DIR = "./outputs"
+DATA_DIR = Path(__file__).parent.parent.parent / "Ciphers"
+OUTPUT_DIR = Path(__file__).parent / "outputs"
 
 @dataclass
 class Config:
@@ -31,9 +31,9 @@ class Config:
     eval_steps: int = 20
 
     # SYSTEM
-    output_dir: str = OUTPUT_DIR
-    data_dir: str = DATA_DIR
-    eval_dir: str = EVAL_DIR
+    output_dir: Path = OUTPUT_DIR
+    data_dir: Path = Path(DATA_DIR) / "Training"
+    test_dir: Path = Path(DATA_DIR) / "Test"
 
 # Instantiate to use across other files
 cfg = Config()
