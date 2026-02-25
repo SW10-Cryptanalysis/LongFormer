@@ -11,7 +11,8 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 class CipherPlainData(Dataset):
     def __init__(self, directory_path):
-        self.file_paths = glob.glob(os.path.join(directory_path, "*.json"))
+        # Ensure directory_path is a string (handles pathlib.Path from config)
+        self.file_paths = glob.glob(os.path.join(str(directory_path), "*.json"))
         if not self.file_paths:
             raise ValueError(f"No .json files found in {os.path.abspath(directory_path)}.")
         
@@ -47,12 +48,9 @@ class CipherPlainData(Dataset):
         # 3. Final safety net
         full_seq = full_seq[:cfg.max_context]
         
+        input_ids = full_seq
         labels = full_seq.copy()
-        padding_length = cfg.max_context - len(full_seq)
-
-        input_ids = full_seq + [0] * padding_length
-        labels = labels + [-100] * padding_length
-        attention_mask = [1] * len(full_seq) + [0] * padding_length
+        attention_mask = [1] * len(full_seq)
         
         assert max(input_ids) < cfg.vocab_size, f"Found token ID {max(input_ids)} but vocab size is {cfg.vocab_size}"
 
@@ -78,30 +76,51 @@ def train():
         eval_strategy="steps",
         eval_steps=cfg.eval_steps,
         bf16=True,
+        ddp_find_unused_parameters=False, 
     )
+    
+    def custom_collator(features):
+        # 1. Find the actual max length in this specific batch
+        max_len = max(len(f["input_ids"]) for f in features)
+        
+        # 2. Longformer requires sequence lengths to be a multiple of its attention window (512)
+        # So we bump max_len up to the nearest multiple of 512
+        remainder = max_len % 512
+        if remainder != 0:
+            max_len += (512 - remainder)
+        
+        batch = {"input_ids": [], "attention_mask": [], "labels": []}
+        for f in features:
+            pad_len = max_len - len(f["input_ids"])
+            batch["input_ids"].append(torch.cat([f["input_ids"], torch.zeros(pad_len, dtype=torch.long)]))
+            batch["attention_mask"].append(torch.cat([f["attention_mask"], torch.zeros(pad_len, dtype=torch.long)]))
+            # Critical: pad labels with -100 so the model doesn't try to predict padding
+            batch["labels"].append(torch.cat([f["labels"], torch.full((pad_len,), -100, dtype=torch.long)]))
+            
+        return {k: torch.stack(v) for k, v in batch.items()}
 
     trainer = Trainer(
         model=model,
         args=args,
-        train_dataset=CipherPlainData(directory_path=cfg.data_dir),
-        eval_dataset=CipherPlainData(directory_path=cfg.test_dir),
+        train_dataset=CipherPlainData(directory_path=str(cfg.data_dir)),
+        eval_dataset=CipherPlainData(directory_path=str(cfg.test_dir)),
+        data_collator=custom_collator
     )
 
-    print(f"Training on {torch.cuda.get_device_name(0)}...")
+    print(f"Training on {torch.cuda.device_count()} GPUs...")
 
     # Check if there is a checkpoint to resume from
     last_checkpoint = None
     if os.path.isdir(cfg.output_dir):
         checkpoints = [d for d in os.listdir(cfg.output_dir) if d.startswith("checkpoint-")]
         if checkpoints:
-            # Sort by number to get the latest (e.g. checkpoint-500, checkpoint-1000)
             checkpoints.sort(key=lambda x: int(x.split('-')[1]))
             last_checkpoint = os.path.join(cfg.output_dir, checkpoints[-1])
             print(f"Resuming from checkpoint: {last_checkpoint}")
 
     trainer.train(resume_from_checkpoint=last_checkpoint)
 
-    trainer.save_model(f"{cfg.output_dir}/model")
+    trainer.save_model(str(cfg.output_dir) + "/model")
 
 if __name__ == "__main__":
     train()

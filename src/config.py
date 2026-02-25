@@ -25,13 +25,13 @@ class Config:
 
     # TRAINING
     batch_size: int = 1
-    grad_accum: int = 16
+    grad_accum: int = 4
     learning_rate: float = 3e-4
     epochs: int = 1
     grad_checkpoint: bool = True
     log_steps: int = 10
-    save_steps: int = 20
-    eval_steps: int = 20
+    save_steps: int = 500
+    eval_steps: int = 500
 
     # SYSTEM
     output_dir: Path = OUTPUT_DIR
