@@ -30,7 +30,7 @@ class Config:
     grad_checkpoint: bool = False
     log_steps: int = 10
     save_steps: int = 500
-    eval_steps: int = 10
+    eval_steps: int = 500
 
     # SYSTEM
     output_dir: Path = OUTPUT_DIR
