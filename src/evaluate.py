@@ -30,7 +30,7 @@ def evaluate():
     
     # 2. Load the model
     model = LongformerForCausalLM.from_pretrained(model_path)
-    model = model.to(device)
+    model = model.to(device) # type: ignore
     
     # GTX 1660 doesn't support bfloat16 natively, but supports float16. 
     # Converting to float16 saves VRAM and runs faster.
@@ -41,7 +41,7 @@ def evaluate():
     max_homophone = cfg.unique_homophones 
     sep_token = max_homophone + 1
     char_offset = sep_token + 1
-    chars = "abcdefghijklmnopqrstuvwxyz " 
+    chars = "abcdefghijklmnopqrstuvwxyz "
     id_to_char = {i + char_offset: char for i, char in enumerate(chars)}
 
     # 4. Load test files (limit to 10)
@@ -80,27 +80,20 @@ def evaluate():
         generated_ids = []
         chars_to_generate = min(len(true_plain), 100) # Generate up to 100 chars for a quick test
         
+        # 5. Generate plaintext (Using HF built-in)
         print("Generating...", end="", flush=True)
         with torch.no_grad():
-            for _ in range(chars_to_generate):
-                # Forward pass
-                outputs = model(input_ids=input_tensor, attention_mask=attention_mask)
-                
-                # Get the most likely next token
-                next_token_logits = outputs.logits[0, -1, :]
-                next_token = torch.argmax(next_token_logits).item()
-                
-                # Stop if we predict padding (0)
-                if next_token == 0: 
-                    break
-                    
-                generated_ids.append(next_token)
-                
-                # Append predicted token to input for the next iteration
-                next_token_tensor = torch.tensor([[next_token]], device=device)
-                input_tensor = torch.cat([input_tensor, next_token_tensor], dim=1)
-                attention_mask = torch.cat([attention_mask, torch.ones_like(next_token_tensor)], dim=1)
-        
+            output_sequence = model.generate( # type: ignore
+                input_ids=input_tensor,
+                attention_mask=attention_mask,
+                max_new_tokens=chars_to_generate,
+                pad_token_id=0,     # Automatically stops generation if it hits padding
+                use_cache=True      # Enables KV caching automatically
+            )
+            
+        # The output includes the input prompt, so we slice it off to just get the new tokens
+        generated_ids = output_sequence[0][input_tensor.shape[1]:].tolist()
+
         # 6. Decode the generated tokens back to characters
         pred_plain = "".join([id_to_char.get(idx, "?") for idx in generated_ids])
         

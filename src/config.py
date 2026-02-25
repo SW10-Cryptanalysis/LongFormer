@@ -10,7 +10,7 @@ DATA_DIR = Path(__file__).parent.parent.parent / "Ciphers"
 TRAINING_DIR = DATA_DIR / "Training"
 TEST_DIR = DATA_DIR / "Test"
 VALIDATION_DIR = DATA_DIR / "Validation"
-OUTPUT_DIR = Path(__file__).parent / "outputs"
+OUTPUT_DIR = Path(__file__).parent.parent / "outputs"
 
 @dataclass
 class Config:
