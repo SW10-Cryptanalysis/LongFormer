@@ -2,6 +2,7 @@ import json
 import glob
 import os
 import torch
+from datasets import load_from_disk
 from model import get_model
 from transformers import Trainer, TrainingArguments
 from torch.utils.data import Dataset
@@ -60,8 +61,93 @@ class CipherPlainData(Dataset):
             "labels": torch.tensor(labels, dtype=torch.long),
         }
 
+def get_datasets():
+    # 1. Check if we already have the tokenized data saved
+    if os.path.exists(cfg.tokenized_data_dir) and os.path.exists(cfg.tokenized_test_dir):
+        print("Found pre-tokenized datasets! Loading from disk...")
+        train_ds = load_from_disk(str(cfg.tokenized_data_dir))
+        test_ds = load_from_disk(str(cfg.tokenized_test_dir))
+        
+        # Ensure format is set to PyTorch tensors
+        train_ds.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
+        test_ds.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
+        return train_ds, test_ds
+
+    # 2. If not, load the raw Arrow datasets we created
+    print("Tokenized datasets not found. Loading raw Arrow datasets...")
+    train_ds = load_from_disk(str(cfg.data_dir))
+    test_ds = load_from_disk(str(cfg.test_dir))
+
+    max_homophone = cfg.unique_homophones 
+    sep_token = max_homophone + 1
+    char_offset = sep_token + 1
+    chars = "abcdefghijklmnopqrstuvwxyz " 
+    char_to_id = {char: i for i, char in enumerate(chars)}
+
+    def tokenize_function(example):
+        cipher_ids = [int(x) for x in example["ciphertext"].split()]
+        plain_ids = [char_to_id.get(c, 0) + char_offset for c in example["plaintext"]]
+
+        max_plain_len = cfg.max_context - 2
+        if len(plain_ids) > max_plain_len:
+            plain_ids = plain_ids[:max_plain_len]
+
+        max_cipher_len = cfg.max_context - len(plain_ids) - 1 
+        if len(cipher_ids) > max_cipher_len:
+            cipher_ids = cipher_ids[:max_cipher_len]
+
+        full_seq = cipher_ids + [sep_token] + plain_ids
+        full_seq = full_seq[:cfg.max_context]
+        
+        return {
+            "input_ids": full_seq,
+            "labels": full_seq.copy(),
+            "attention_mask": [1] * len(full_seq)
+        }
+
+    # 3. Apply the tokenization
+    print("Tokenizing datasets (this will only happen once!)...")
+    train_ds = train_ds.map(tokenize_function, num_proc=8, remove_columns=["ciphertext", "plaintext"])
+    test_ds = test_ds.map(tokenize_function, num_proc=8, remove_columns=["ciphertext", "plaintext"])
+
+    # 4. Save the result to disk so we never have to do this again
+    print(f"Saving tokenized training data to {cfg.tokenized_data_dir}...")
+    train_ds.save_to_disk(str(cfg.tokenized_data_dir))
+    
+    print(f"Saving tokenized test data to {cfg.tokenized_test_dir}...")
+    test_ds.save_to_disk(str(cfg.tokenized_test_dir))
+
+    # Set format to PyTorch tensors
+    train_ds.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
+    test_ds.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
+
+    return train_ds, test_ds
+
+
+def custom_collator(features):
+    # 1. Find the actual max length in this specific batch
+    max_len = max(len(f["input_ids"]) for f in features)
+    
+    # 2. Longformer requires sequence lengths to be a multiple of its attention window (512)
+    # So we bump max_len up to the nearest multiple of 512
+    remainder = max_len % 512
+    if remainder != 0:
+        max_len += (512 - remainder)
+    
+    batch = {"input_ids": [], "attention_mask": [], "labels": []}
+    for f in features:
+        pad_len = max_len - len(f["input_ids"])
+        batch["input_ids"].append(torch.cat([f["input_ids"], torch.zeros(pad_len, dtype=torch.long)]))
+        batch["attention_mask"].append(torch.cat([f["attention_mask"], torch.zeros(pad_len, dtype=torch.long)]))
+        # Critical: pad labels with -100 so the model doesn't try to predict padding
+        batch["labels"].append(torch.cat([f["labels"], torch.full((pad_len,), -100, dtype=torch.long)]))
+        
+    return {k: torch.stack(v) for k, v in batch.items()}
+
+
 def train():
     model = get_model()
+    train_ds, test_ds = get_datasets()
 
     args = TrainingArguments(
         output_dir=str(cfg.output_dir),
@@ -79,32 +165,12 @@ def train():
         ddp_find_unused_parameters=True,
         dataloader_num_workers=8,
     )
-    
-    def custom_collator(features):
-        # 1. Find the actual max length in this specific batch
-        max_len = max(len(f["input_ids"]) for f in features)
-        
-        # 2. Longformer requires sequence lengths to be a multiple of its attention window (512)
-        # So we bump max_len up to the nearest multiple of 512
-        remainder = max_len % 512
-        if remainder != 0:
-            max_len += (512 - remainder)
-        
-        batch = {"input_ids": [], "attention_mask": [], "labels": []}
-        for f in features:
-            pad_len = max_len - len(f["input_ids"])
-            batch["input_ids"].append(torch.cat([f["input_ids"], torch.zeros(pad_len, dtype=torch.long)]))
-            batch["attention_mask"].append(torch.cat([f["attention_mask"], torch.zeros(pad_len, dtype=torch.long)]))
-            # Critical: pad labels with -100 so the model doesn't try to predict padding
-            batch["labels"].append(torch.cat([f["labels"], torch.full((pad_len,), -100, dtype=torch.long)]))
-            
-        return {k: torch.stack(v) for k, v in batch.items()}
 
     trainer = Trainer(
         model=model,
         args=args,
-        train_dataset=CipherPlainData(directory_path=str(cfg.data_dir)),
-        eval_dataset=CipherPlainData(directory_path=str(cfg.test_dir)),
+        train_dataset=train_ds,
+        eval_dataset=test_ds,
         data_collator=custom_collator
     )
 
