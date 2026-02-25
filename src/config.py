@@ -5,7 +5,6 @@ TEXT_LEN = 8_192
 UNIQUE_HOMOPHONE_COUNT = 8192
 UNIQUE_LETTER_COUNT = 30
 TOTAL_SEQ = TEXT_LEN * 2
-BUFFER = 10
 DATA_DIR = Path(__file__).parent.parent.parent / "Ciphers"
 TRAINING_DIR = DATA_DIR / "Training"
 TEST_DIR = DATA_DIR / "Test"
@@ -18,7 +17,7 @@ class Config:
     unique_homophones: int = UNIQUE_HOMOPHONE_COUNT
     unique_letters: int = UNIQUE_LETTER_COUNT
     vocab_size: int = unique_homophones + unique_letters + 5
-    max_context: int = TOTAL_SEQ + BUFFER
+    max_context: int = TOTAL_SEQ
     dims: int = 384
     layers: int = 16
     att_heads: int = 6
