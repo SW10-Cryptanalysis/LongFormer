@@ -7,6 +7,9 @@ UNIQUE_LETTER_COUNT = 30
 TOTAL_SEQ = TEXT_LEN * 2
 BUFFER = 10
 DATA_DIR = Path(__file__).parent.parent.parent / "Ciphers"
+TRAINING_DIR = DATA_DIR / "Training"
+TEST_DIR = DATA_DIR / "Test"
+VALIDATION_DIR = DATA_DIR / "Validation"
 OUTPUT_DIR = Path(__file__).parent / "outputs"
 
 @dataclass
@@ -32,8 +35,8 @@ class Config:
 
     # SYSTEM
     output_dir: Path = OUTPUT_DIR
-    data_dir: Path = Path(DATA_DIR) / "Training"
-    test_dir: Path = Path(DATA_DIR) / "Test"
+    data_dir: Path = TRAINING_DIR
+    test_dir: Path = TEST_DIR
 
 # Instantiate to use across other files
 cfg = Config()

@@ -46,7 +46,7 @@ def evaluate():
 
     # 4. Load test files (limit to 10)
     test_dir = "./data/eval"
-    test_files = glob.glob(os.path.join(cfg.eval_dir, "*.json"))[:10]
+    test_files = glob.glob(os.path.join(cfg.test_dir, "*.json"))[:10]
     
     if not test_files:
         print(f"No test files found in {test_dir}.")
