@@ -159,6 +159,7 @@ def train():
         gradient_checkpointing=cfg.grad_checkpoint,
         logging_steps=cfg.log_steps,
         save_steps=cfg.save_steps,
+        save_total_limit=3, # Keep only the 3 most recent checkpoints to save disk space
         eval_strategy="steps",
         eval_steps=cfg.eval_steps,
         bf16=True,
