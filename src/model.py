@@ -48,6 +48,8 @@ class LongformerForCausalLM(LongformerPreTrainedModel):
 
 def get_model():
     """Init model with params from config"""
+    staggered_windows = [512]*4 + [1024]*4 + [2560]*4
+    
     conf = LongformerConfig(
         vocab_size=cfg.vocab_size,
         max_position_embeddings=cfg.max_context + 2, # +2 for safety buffer
@@ -56,11 +58,12 @@ def get_model():
         num_hidden_layers=cfg.layers,
         intermediate_size=cfg.dims * 4,
         num_attention_heads=cfg.att_heads,
-        attention_window=[512] * cfg.layers,
+        attention_window=staggered_windows,
         hidden_act="silu",
         initializer_range=0.02,
         layer_norm_eps=1e-5,
         is_decoder=True, # Ensures causal masking
+        tie_word_embeddings=True,
     )
 
     model = LongformerForCausalLM(conf)
