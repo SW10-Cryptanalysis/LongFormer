@@ -9,10 +9,10 @@ DATA_DIR = Path(__file__).parent.parent.parent / "Ciphers"
 TRAINING_DIR = DATA_DIR / "Training_Arrow"
 TEST_DIR = DATA_DIR / "Test_Arrow"
 VALIDATION_DIR = DATA_DIR / "Validation"
+TOKENIZED_DATA_DIR = DATA_DIR / "Training_Tokenized"
+TOKENIZED_TEST_DIR = DATA_DIR / "Test_Tokenized"
 
 OUTPUT_DIR = Path(__file__).parent.parent / "outputs"
-TOKENIZED_DATA_DIR = OUTPUT_DIR / "Training_Tokenized"
-TOKENIZED_TEST_DIR = OUTPUT_DIR / "Test_Tokenized"
 
 @dataclass
 class Config:
