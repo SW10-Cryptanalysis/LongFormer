@@ -23,7 +23,7 @@ class Config:
     vocab_size: int = unique_homophones + unique_letters + 5
     max_context: int = TOTAL_SEQ
     dims: int = 384
-    layers: int = 12
+    layers: int = 16
     att_heads: int = 6
 
     # TRAINING
