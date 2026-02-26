@@ -6,8 +6,8 @@ UNIQUE_HOMOPHONE_COUNT = 8192
 UNIQUE_LETTER_COUNT = 30
 TOTAL_SEQ = TEXT_LEN * 2
 DATA_DIR = Path(__file__).parent.parent.parent / "Ciphers"
-TRAINING_DIR = DATA_DIR / "Training" / "Training_Arrow"
-TEST_DIR = DATA_DIR / "Test" / "Test_Arrow"
+TRAINING_DIR = DATA_DIR / "Training_Arrow"
+TEST_DIR = DATA_DIR / "Test_Arrow"
 VALIDATION_DIR = DATA_DIR / "Validation"
 
 OUTPUT_DIR = Path(__file__).parent.parent / "outputs"
