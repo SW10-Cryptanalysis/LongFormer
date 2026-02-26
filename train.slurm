@@ -20,6 +20,7 @@ echo "Job started on $(hostname) at $(date)" | tee logs/train_live_${SLURM_JOB_I
 nvidia-smi | tee -a logs/train_live_${SLURM_JOB_ID}.log
 
 export PATH="$HOME/.local/bin:$PATH"
+export OMP_NUM_THREADS=8
 
 # Use torchrun to launch distributed training on 4 GPUs
 uv run torchrun --nproc_per_node=4 src/train.py 2>&1 | tee -a logs/train_live_${SLURM_JOB_ID}.log
