@@ -128,11 +128,11 @@ def custom_collator(features):
     # 1. Find the actual max length in this specific batch
     max_len = max(len(f["input_ids"]) for f in features)
     
-    # 2. Longformer requires sequence lengths to be a multiple of its attention window (512)
-    # So we bump max_len up to the nearest multiple of 512
-    remainder = max_len % 512
+    # 2. Longformer requires sequence lengths to be a multiple of its attention window (2048)
+    # So we bump max_len up to the nearest multiple of 2048
+    remainder = max_len % 2048
     if remainder != 0:
-        max_len += (512 - remainder)
+        max_len += (2048 - remainder)
     
     batch = {"input_ids": [], "attention_mask": [], "labels": []}
     for f in features:

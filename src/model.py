@@ -48,7 +48,7 @@ class LongformerForCausalLM(LongformerPreTrainedModel):
 
 def get_model():
     """Init model with params from config"""
-    staggered_windows = [512]*4 + [1024]*4 + [2560]*4
+    staggered_windows = [1024]*8 + [2048]*4
     
     conf = LongformerConfig(
         vocab_size=cfg.vocab_size,
