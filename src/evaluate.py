@@ -45,11 +45,10 @@ def evaluate():
     id_to_char = {i + char_offset: char for i, char in enumerate(chars)}
 
     # 4. Load test files (limit to 10)
-    test_dir = "./data/eval"
-    test_files = glob.glob(os.path.join(cfg.test_dir, "*.json"))[:10]
+    test_files = glob.glob(os.path.join(cfg.eval_dir, "*.json"))[:10]
     
     if not test_files:
-        print(f"No test files found in {test_dir}.")
+        print(f"No test files found in {cfg.eval_dir}.")
         return
 
     print(f"\nTesting on {len(test_files)} files...\n")
