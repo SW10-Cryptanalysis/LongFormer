@@ -75,7 +75,7 @@ def get_datasets():
 
     # 2. If not, load the raw Arrow datasets we created
     print("Tokenized datasets not found. Loading raw Arrow datasets...")
-    train_ds = load_from_disk(str(cfg.train_dir))
+    train_ds = load_from_disk(str(cfg.data_dir))
     test_ds = load_from_disk(str(cfg.test_dir))
 
     max_homophone = cfg.unique_homophones 
@@ -147,7 +147,7 @@ def custom_collator(features):
 
 def train():
     model = get_model()
-    # train_ds, test_ds = get_datasets()
+    train_ds, test_ds = get_datasets()
 
     args = TrainingArguments(
         output_dir=str(cfg.output_dir),
@@ -169,8 +169,8 @@ def train():
     trainer = Trainer(
         model=model,
         args=args,
-        train_dataset=CipherPlainData(cfg.train_dir),
-        eval_dataset=CipherPlainData(cfg.test_dir),
+        train_dataset=train_ds,
+        eval_dataset=test_ds,
         data_collator=custom_collator
     )
 

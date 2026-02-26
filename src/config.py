@@ -6,8 +6,8 @@ UNIQUE_HOMOPHONE_COUNT = 8192
 UNIQUE_LETTER_COUNT = 30
 TOTAL_SEQ = TEXT_LEN * 2
 DATA_DIR = Path(__file__).parent.parent.parent / "Ciphers"
-TRAINING_DIR = DATA_DIR / "Training"
-TEST_DIR = DATA_DIR / "Test"
+TRAINING_DIR = DATA_DIR / "Training_Arrow"
+TEST_DIR = DATA_DIR / "Test_Arrow"
 VALIDATION_DIR = DATA_DIR / "Validation"
 TOKENIZED_DATA_DIR = DATA_DIR / "Training_Tokenized"
 TOKENIZED_TEST_DIR = DATA_DIR / "Test_Tokenized"
@@ -32,12 +32,12 @@ class Config:
     epochs: int = 1
     grad_checkpoint: bool = False
     log_steps: int = 10
-    save_steps: int = 1000
-    eval_steps: int = 10000
+    save_steps: int = 500
+    eval_steps: int = 500
 
     # SYSTEM
     output_dir: Path = OUTPUT_DIR
-    train_dir: Path = TRAINING_DIR
+    data_dir: Path = TRAINING_DIR
     test_dir: Path = TEST_DIR
     tokenized_data_dir: Path = TOKENIZED_DATA_DIR
     tokenized_test_dir: Path = TOKENIZED_TEST_DIR
