@@ -130,9 +130,9 @@ def custom_collator(features):
     
     # 2. Longformer requires sequence lengths to be a multiple of its attention window (2048)
     # So we bump max_len up to the nearest multiple of 2048
-    remainder = max_len % 2048
+    remainder = max_len % 1024
     if remainder != 0:
-        max_len += (2048 - remainder)
+        max_len += (1024 - remainder)
     
     batch = {"input_ids": [], "attention_mask": [], "labels": []}
     for f in features:
