@@ -163,6 +163,9 @@ def train():
         eval_steps=cfg.eval_steps,
         bf16=True,
         ddp_find_unused_parameters=True,
+        torch_compile=True, # PyTorch 2.0 compilation for faster training
+        use_liger_kernel=True, # Use Liger's optimized kernels for Longformer
+        tf32=True, # Enable TF32 on compatible GPUs for faster training
         dataloader_num_workers=8,
     )
 

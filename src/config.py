@@ -32,7 +32,7 @@ class Config:
     epochs: int = 1
     grad_checkpoint: bool = False
     log_steps: int = 10
-    save_steps: int = 500
+    save_steps: int = 1000
     eval_steps: int = 500
 
     # SYSTEM
