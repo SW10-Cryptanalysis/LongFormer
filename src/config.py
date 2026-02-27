@@ -36,6 +36,7 @@ class Config:
     packing: bool = True
     torch_compile: bool = True
     bf16: bool = True
+    hidden_act: str = "silu"
     
     @property
     def hidden_size(self):
