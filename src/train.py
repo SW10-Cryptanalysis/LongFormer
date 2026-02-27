@@ -8,7 +8,6 @@ from config import cfg
 
 # Force expanded segments for fragmentation
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-os.environ = "expandable_segments:True"
 
 class ArrowDatasetWrapper(Dataset):
     def __init__(self, directory_path):
