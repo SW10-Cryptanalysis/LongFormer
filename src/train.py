@@ -91,6 +91,7 @@ def train():
         logging_steps=cfg.log_steps,
         save_steps=cfg.save_steps,
         save_total_limit=2,
+        eval_steps=cfg.eval_steps,
         
         # Speed
         torch_compile=cfg.torch_compile,
@@ -99,7 +100,10 @@ def train():
         # DDP/FSDP
         # For 4x L4, we want FSDP to shard the model states
         fsdp="full_shard auto_wrap", 
-        fsdp_config={"transformer_layer_cls_to_wrap": ["CustomLayer"]},
+        fsdp_config={
+            "transformer_layer_cls_to_wrap": ["CustomLayer"],
+            "activation_checkpointing": cfg.grad_checkpoint,
+        },
     )
 
     trainer = Trainer(

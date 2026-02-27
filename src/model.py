@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.checkpoint as checkpoint
 import math
 from config import cfg
 
@@ -216,6 +217,7 @@ class RecurrenceModel(nn.Module):
         super().__init__()
         self.config = config
         self.embed = nn.Embedding(config.vocab_size, config.dims)
+        self.gradient_checkpointing = False
         
         self.layers = nn.ModuleList([
             CustomLayer(config) for _ in range(config.layers)
@@ -223,18 +225,28 @@ class RecurrenceModel(nn.Module):
         
         if LIGER_AVAILABLE and config.use_liger:
             self.norm = LigerRMSNorm(config.dims)
-            # Liger Fused Head handles the final projection AND loss efficiently
             self.output_head = LigerFusedLinearCrossEntropyLoss()
         else:
             self.norm = nn.RMSNorm(config.dims)
             self.output_head = nn.Linear(config.dims, config.vocab_size, bias=False)
+            
+    
+    def gradient_checkpointing_enable(self, **kwargs):
+        self.gradient_checkpointing = True
+
+    def gradient_checkpointing_disable(self):
+        self.gradient_checkpointing = False
 
     def forward(self, input_ids, output_hidden_states=False, labels=None, **kwargs):
         # input_ids: Recurrence distance IDs [batch, seq]
         x = self.embed(input_ids)
         
         for layer in self.layers:
-            x = layer(x, **kwargs)
+            if self.gradient_checkpointing and self.training:
+                # use_reentrant=False is the modern, safer PyTorch implementation
+                x = checkpoint.checkpoint(layer, x, use_reentrant=False, **kwargs)
+            else:
+                x = layer(x, **kwargs)
             
         x = self.norm(x)
         
