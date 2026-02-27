@@ -91,7 +91,7 @@ class BlockSlidingWindowAttention(nn.Module):
         # Chunking Strategy for O(N) Complexity
         # We process in chunks of 'window_size'. 
         w = self.window_size
-        bsz, seq_len, _ = q.shape
+        bsz, seq_len, _, _ = q.shape
         
         # Calculate padding needed
         pad_len = (w - (seq_len % w)) % w

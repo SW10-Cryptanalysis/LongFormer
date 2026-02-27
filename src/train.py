@@ -97,8 +97,10 @@ def train():
         
         # DDP/FSDP
         # For 4x L4, we want FSDP to shard the model states
-        fsdp="full_shard auto_wrap", 
+        fsdp="",
         fsdp_config={
+            "reshard_after_forward": "FULL_SHARD", # The modern equivalent of "full_shard"
+            "auto_wrap_policy": "TRANSFORMER_BASED_WRAP", # The modern equivalent of "auto_wrap"
             "transformer_layer_cls_to_wrap": ["CustomLayer"],
             "activation_checkpointing": cfg.grad_checkpoint,
         },
