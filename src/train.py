@@ -9,23 +9,23 @@ from config import cfg
 
 # Force expanded segments for fragmentation
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ = "expandable_segments:True"
 
-class CipherPlainData(Dataset):
+class ArrowDatasetWrapper(Dataset):
     def __init__(self, directory_path):
-        self.file_paths = glob.glob(os.path.join(str(directory_path), "*.json"))
-        if not self.file_paths:
-            print(f"Warning: No .json files in {directory_path}")
+        # Load the Hugging Face Arrow dataset natively
+        self.hf_dataset = load_from_disk(str(directory_path))
+        if len(self.hf_dataset) == 0:
+            print(f"Warning: Dataset at {directory_path} is empty.")
 
     def __len__(self):
-        return len(self.file_paths)
+        return len(self.hf_dataset)
 
     def __getitem__(self, idx):
-        with open(self.file_paths[idx], 'r') as f:
-            data = json.load(f)
-            
+        # Access the row directly from the Arrow dataset
+        data = self.hf_dataset[idx]
+        
         # Parse integers from the string
-        # Assuming format "1 50 2 300 ..." as space separated int IDs
-        # The user states this is "recurrence encoded" or at least ready to use.
         input_ids = [int(x) for x in data["ciphertext"].split()]
         
         # Ensure we don't exceed max context
@@ -70,8 +70,8 @@ def packing_collate(batch):
 def train():
     model = get_model()
     
-    train_ds = CipherPlainData(cfg.data_dir)
-    test_ds = CipherPlainData(cfg.test_dir)
+    train_ds = ArrowDatasetWrapper(cfg.data_dir)
+    test_ds = ArrowDatasetWrapper(cfg.test_dir)
 
     train_args = TrainingArguments(
         output_dir=str(cfg.output_dir),
