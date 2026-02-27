@@ -2,27 +2,19 @@ import json
 import glob
 import os
 import torch
-from datasets import load_from_disk
+from torch.utils.data import Dataset
 from model import get_model
 from transformers import Trainer, TrainingArguments
-from torch.utils.data import Dataset
 from config import cfg
 
+# Force expanded segments for fragmentation
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 class CipherPlainData(Dataset):
     def __init__(self, directory_path):
-        # Ensure directory_path is a string (handles pathlib.Path from config)
         self.file_paths = glob.glob(os.path.join(str(directory_path), "*.json"))
         if not self.file_paths:
-            raise ValueError(f"No .json files found in {os.path.abspath(directory_path)}.")
-        
-        self.max_homophone = cfg.unique_homophones 
-        self.sep_token = self.max_homophone + 1
-        self.char_offset = self.sep_token + 1
-        
-        self.chars = "abcdefghijklmnopqrstuvwxyz " 
-        self.char_to_id = {char: i for i, char in enumerate(self.chars)}
+            print(f"Warning: No .json files in {directory_path}")
 
     def __len__(self):
         return len(self.file_paths)
@@ -30,168 +22,107 @@ class CipherPlainData(Dataset):
     def __getitem__(self, idx):
         with open(self.file_paths[idx], 'r') as f:
             data = json.load(f)
-
-        cipher_ids = [int(x) for x in data["ciphertext"].split()]
-        plain_ids = [self.char_to_id.get(c, 0) + self.char_offset for c in data["plaintext"]]
-
-        # 1. Safely truncate plain_ids first if it's absurdly long
-        max_plain_len = cfg.max_context - 2
-        if len(plain_ids) > max_plain_len:
-            plain_ids = plain_ids[:max_plain_len]
-
-        # 2. Now max_cipher_len is guaranteed to be >= 1
-        max_cipher_len = cfg.max_context - len(plain_ids) - 1 
-        if len(cipher_ids) > max_cipher_len:
-            cipher_ids = cipher_ids[:max_cipher_len]
-
-        full_seq = cipher_ids + [self.sep_token] + plain_ids
+            
+        # Parse integers from the string
+        # Assuming format "1 50 2 300 ..." as space separated int IDs
+        # The user states this is "recurrence encoded" or at least ready to use.
+        input_ids = [int(x) for x in data["ciphertext"].split()]
         
-        # 3. Final safety net
-        full_seq = full_seq[:cfg.max_context]
-        
-        input_ids = full_seq
-        labels = full_seq.copy()
-        attention_mask = [1] * len(full_seq)
-        
-        assert max(input_ids) < cfg.vocab_size, f"Found token ID {max(input_ids)} but vocab size is {cfg.vocab_size}"
-
+        # Ensure we don't exceed max context
+        if len(input_ids) > cfg.max_context:
+            input_ids = input_ids[:cfg.max_context]
+            
+        # For CausalLM, labels are same as input
         return {
             "input_ids": torch.tensor(input_ids, dtype=torch.long),
-            "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
-            "labels": torch.tensor(labels, dtype=torch.long),
+            "labels": torch.tensor(input_ids, dtype=torch.long)
         }
 
-def get_datasets():
-    # 1. Check if we already have the tokenized data saved
-    if os.path.exists(cfg.tokenized_data_dir) and os.path.exists(cfg.tokenized_test_dir):
-        print("Found pre-tokenized datasets! Loading from disk...")
-        train_ds = load_from_disk(str(cfg.tokenized_data_dir))
-        test_ds = load_from_disk(str(cfg.tokenized_test_dir))
-        
-        # Ensure format is set to PyTorch tensors
-        train_ds.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
-        test_ds.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
-        return train_ds, test_ds
-
-    # 2. If not, load the raw Arrow datasets we created
-    print("Tokenized datasets not found. Loading raw Arrow datasets...")
-    train_ds = load_from_disk(str(cfg.data_dir))
-    test_ds = load_from_disk(str(cfg.test_dir))
-
-    max_homophone = cfg.unique_homophones 
-    sep_token = max_homophone + 1
-    char_offset = sep_token + 1
-    chars = "abcdefghijklmnopqrstuvwxyz " 
-    char_to_id = {char: i for i, char in enumerate(chars)}
-
-    def tokenize_function(example):
-        cipher_ids = [int(x) for x in example["ciphertext"].split()]
-        plain_ids = [char_to_id.get(c, 0) + char_offset for c in example["plaintext"]]
-
-        max_plain_len = cfg.max_context - 2
-        if len(plain_ids) > max_plain_len:
-            plain_ids = plain_ids[:max_plain_len]
-
-        max_cipher_len = cfg.max_context - len(plain_ids) - 1 
-        if len(cipher_ids) > max_cipher_len:
-            cipher_ids = cipher_ids[:max_cipher_len]
-
-        full_seq = cipher_ids + [sep_token] + plain_ids
-        full_seq = full_seq[:cfg.max_context]
-        
-        return {
-            "input_ids": full_seq,
-            "labels": full_seq.copy(),
-            "attention_mask": [1] * len(full_seq)
-        }
-
-    # 3. Apply the tokenization
-    print("Tokenizing datasets (this will only happen once!)...")
-    train_ds = train_ds.map(tokenize_function, num_proc=8, remove_columns=["ciphertext", "plaintext"])
-    test_ds = test_ds.map(tokenize_function, num_proc=8, remove_columns=["ciphertext", "plaintext"])
-
-    # 4. Save the result to disk so we never have to do this again
-    print(f"Saving tokenized training data to {cfg.tokenized_data_dir}...")
-    train_ds.save_to_disk(str(cfg.tokenized_data_dir))
+def packing_collate(batch):
+    """
+    Concatenates all sequences into one long buffer.
+    In a real implementation we would preserve 'cu_seqlens' and pass it to the model 
+    to reset attention masks. Our 'BlockSlidingWindowAttention' currently assumes 
+    continuous relative positions or standard padding. 
     
-    print(f"Saving tokenized test data to {cfg.tokenized_test_dir}...")
-    test_ds.save_to_disk(str(cfg.tokenized_test_dir))
-
-    # Set format to PyTorch tensors
-    train_ds.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
-    test_ds.set_format(type="torch", columns=["input_ids", "attention_mask", "labels"])
-
-    return train_ds, test_ds
-
-
-def custom_collator(features):
-    # 1. Find the actual max length in this specific batch
-    max_len = max(len(f["input_ids"]) for f in features)
+    For now, we simply pad to the longest in the batch to be safe with the custom attention
+    Wait: The Plan calls for Packing.
+    """
+    # 1. Concatenate inputs
+    concat_input = torch.cat([item["input_ids"] for item in batch])
+    concat_label = torch.cat([item["labels"] for item in batch])
     
-    # 2. Longformer requires sequence lengths to be a multiple of its attention window (2048)
-    # So we bump max_len up to the nearest multiple of 2048
-    remainder = max_len % 1024
-    if remainder != 0:
-        max_len += (1024 - remainder)
-    
-    batch = {"input_ids": [], "attention_mask": [], "labels": []}
-    for f in features:
-        pad_len = max_len - len(f["input_ids"])
-        batch["input_ids"].append(torch.cat([f["input_ids"], torch.zeros(pad_len, dtype=torch.long)]))
-        batch["attention_mask"].append(torch.cat([f["attention_mask"], torch.zeros(pad_len, dtype=torch.long)]))
-        # Critical: pad labels with -100 so the model doesn't try to predict padding
-        batch["labels"].append(torch.cat([f["labels"], torch.full((pad_len,), -100, dtype=torch.long)]))
+    # Trim to nearest multiple of window size to avoid shape errors
+    r = len(concat_input) % cfg.window_size
+    if r != 0:
+        concat_input = concat_input[:-r]
+        concat_label = concat_label[:-r]
         
-    return {k: torch.stack(v) for k, v in batch.items()}
-
+    # Check if we are too small (rare)
+    if len(concat_input) == 0:
+        return batch[0] # Fallback
+        
+    return {
+        "input_ids": concat_input.unsqueeze(0), # Add batch dim [1, Seq]
+        "labels": concat_label.unsqueeze(0)
+    }
 
 def train():
     model = get_model()
-    train_ds, test_ds = get_datasets()
+    
+    train_ds = CipherPlainData(cfg.data_dir)
+    test_ds = CipherPlainData(cfg.test_dir)
 
-    args = TrainingArguments(
+    train_args = TrainingArguments(
         output_dir=str(cfg.output_dir),
         num_train_epochs=cfg.epochs,
-        per_device_train_batch_size=cfg.batch_size,
-        per_device_eval_batch_size=cfg.batch_size,
+        per_device_train_batch_size=cfg.batch_size, # 1, due to packing high seq len
         gradient_accumulation_steps=cfg.grad_accum,
         learning_rate=cfg.learning_rate,
+        weight_decay=0.01,
+        
+        # Checkpointing
         gradient_checkpointing=cfg.grad_checkpoint,
+        
+        # FP16/BF16
+        bf16=cfg.bf16,
+        
+        # Logging
         logging_steps=cfg.log_steps,
         save_steps=cfg.save_steps,
-        save_total_limit=3, # Keep only the 3 most recent checkpoints to save disk space
-        eval_strategy="steps",
-        eval_steps=cfg.eval_steps,
-        bf16=True,
-        ddp_find_unused_parameters=True,
-        torch_compile=True, # PyTorch 2.0 compilation for faster training
-        use_liger_kernel=True, # Use Liger's optimized kernels for Longformer
-        tf32=True, # Enable TF32 on compatible GPUs for faster training
-        dataloader_num_workers=8,
+        save_total_limit=2,
+        
+        # Speed
+        torch_compile=cfg.torch_compile,
+        dataloader_num_workers=4,
+        
+        # DDP/FSDP
+        # For 4x L4, we want FSDP to shard the model states
+        fsdp="full_shard auto_wrap", 
+        fsdp_config={"transformer_layer_cls_to_wrap": ["CustomLayer"]},
     )
 
     trainer = Trainer(
         model=model,
-        args=args,
+        args=train_args,
         train_dataset=train_ds,
         eval_dataset=test_ds,
-        data_collator=custom_collator
+        data_collator=packing_collate
     )
 
-    print(f"Training on {torch.cuda.device_count()} GPUs...")
-
-    # Check if there is a checkpoint to resume from
-    last_checkpoint = None
-    if os.path.isdir(cfg.output_dir):
-        checkpoints = [d for d in os.listdir(cfg.output_dir) if d.startswith("checkpoint-")]
-        if checkpoints:
-            checkpoints.sort(key=lambda x: int(x.split('-')[1]))
-            last_checkpoint = os.path.join(cfg.output_dir, checkpoints[-1])
-            print(f"Resuming from checkpoint: {last_checkpoint}")
-
-    trainer.train(resume_from_checkpoint=last_checkpoint)
-
-    trainer.save_model(str(cfg.output_dir) + "/model")
+    print(f"Starting training on {torch.cuda.device_count()} GPUs...")
+    trainer.train()
+    
+    # Save manually since Trainer wrapper might fail on bare nn.Module without save_pretrained
+    model_state = model.state_dict()
+    # Save standard torch bin/safetensors
+    output_path = str(cfg.output_dir) + "/final_model"
+    os.makedirs(output_path, exist_ok=True)
+    torch.save(model_state, output_path + "/pytorch_model.bin")
+    
+    # Also save config
+    # with open(output_path + "/config.json", "w") as f:
+    #     json.dump(asdict(cfg), f)
 
 if __name__ == "__main__":
     train()

@@ -1,10 +1,12 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+# Constants matching roughly 16k context for recurrence distances
+# text_len = 8192, total_seq = 16384. 
+# We need vocab > 16384 to cover all possible recurrence distances.
 TEXT_LEN = 8_192
-UNIQUE_HOMOPHONE_COUNT = 8192
-UNIQUE_LETTER_COUNT = 30
 TOTAL_SEQ = TEXT_LEN * 2
+
 DATA_DIR = Path(__file__).parent.parent.parent / "Ciphers"
 TRAINING_DIR = DATA_DIR / "Training_Arrow"
 TEST_DIR = DATA_DIR / "Test_Arrow"
@@ -18,23 +20,32 @@ OUTPUT_DIR = Path(__file__).parent.parent / "outputs"
 @dataclass
 class Config:
     # ARCHITECTURE
-    unique_homophones: int = UNIQUE_HOMOPHONE_COUNT
-    unique_letters: int = UNIQUE_LETTER_COUNT
-    vocab_size: int = unique_homophones + unique_letters + 5
+    # Vocab size needs to be large enough for max recurrence distance (which is seq_len)
+    # plus 30 output chars + special tokens.
+    unique_homophones: int = 8192
     max_context: int = TOTAL_SEQ
-    dims: int = 384
+    vocab_size: int = 16500 
+    dims: int = 512
     layers: int = 16
-    att_heads: int = 6
+    att_heads: int = 8 
+    
+    # Custom Arch
+    window_size: int = 512
+    rope_theta: float = 10000.0
+    use_liger: bool = True
+    packing: bool = True
+    torch_compile: bool = True
+    bf16: bool = True
 
     # TRAINING
-    batch_size: int = 1
-    grad_accum: int = 4
-    learning_rate: float = 3e-4
+    batch_size: int = 1 # Per device (will be packed)
+    grad_accum: int = 8
+    learning_rate: float = 2e-4
     epochs: int = 1
-    grad_checkpoint: bool = False
-    log_steps: int = 10
+    grad_checkpoint: bool = True  # Enable by default for 16k
+    log_steps: int = 100
     save_steps: int = 1000
-    eval_steps: int = 10000
+    eval_steps: int = 5000
 
     # SYSTEM
     output_dir: Path = OUTPUT_DIR

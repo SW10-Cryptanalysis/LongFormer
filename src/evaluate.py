@@ -3,7 +3,7 @@ import glob
 import os
 import torch
 import Levenshtein
-from model import LongformerForCausalLM
+from model import get_model
 from config import cfg
 
 def evaluate():
@@ -29,12 +29,33 @@ def evaluate():
     print(f"Loading model from {model_path}...")
     
     # 2. Load the model
-    model = LongformerForCausalLM.from_pretrained(model_path)
-    model = model.to(device) # type: ignore
+    # model = LongformerForCausalLM.from_pretrained(model_path)
+    # Since we are using a custom nn.Module, we load architecture then weights
+    model = get_model()
+    
+    # Check if safe tensors or bin
+    state_dict_path = os.path.join(model_path, "model.safetensors")
+    if os.path.exists(state_dict_path):
+        from safetensors.torch import load_file
+        state_dict = load_file(state_dict_path)
+    else:
+        # Fallback to bin
+        state_dict_path = os.path.join(model_path, "pytorch_model.bin")
+        if os.path.exists(state_dict_path):
+            state_dict = torch.load(state_dict_path, map_location=device)
+        else:
+            print("Could not find model weights (safetensors or bin).")
+            return
+
+    model.load_state_dict(state_dict, strict=False)
+    model = model.to(device)
     
     # GTX 1660 doesn't support bfloat16 natively, but supports float16. 
     # Converting to float16 saves VRAM and runs faster.
-    model = model.half() 
+    if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+        model = model.bfloat16()
+    else:
+        model = model.half() 
     model.eval()
 
     # 3. Setup tokenization (matching train.py)
@@ -69,7 +90,7 @@ def evaluate():
         # Prepare input
         input_ids = cipher_ids + [sep_token]
         input_tensor = torch.tensor([input_ids], dtype=torch.long).to(device)
-        attention_mask = torch.ones_like(input_tensor).to(device)
+        # attention_mask = torch.ones_like(input_tensor).to(device) # Unused in custom model which handles causal masking
         
         print(f"File: {os.path.basename(file_path)}")
         print(f"Cipher length: {len(cipher_ids)} tokens")
@@ -79,19 +100,30 @@ def evaluate():
         generated_ids = []
         chars_to_generate = min(len(true_plain), 100) # Generate up to 100 chars for a quick test
         
-        # 5. Generate plaintext (Using HF built-in)
+        curr_input_ids = input_ids[:] # Copy list
+        
         print("Generating...", end="", flush=True)
         with torch.no_grad():
-            output_sequence = model.generate( # type: ignore
-                input_ids=input_tensor,
-                attention_mask=attention_mask,
-                max_new_tokens=chars_to_generate,
-                pad_token_id=0,     # Automatically stops generation if it hits padding
-                use_cache=True      # Enables KV caching automatically
-            )
+            for _ in range(chars_to_generate):
+                # Prepare tensor
+                input_tensor = torch.tensor([curr_input_ids], dtype=torch.long).to(device)
+                # Forward pass
+                outputs = model(input_tensor)
+                next_token_logits = outputs["logits"][0, -1, :] # Last token
+                
+                # Greedy choice
+                next_token = int(torch.argmax(next_token_logits).item())
+                
+                # Append
+                generated_ids.append(next_token)
+                curr_input_ids.append(next_token)
+                
+                # Stop if padding (0)
+                if next_token == 0:
+                    break
             
         # The output includes the input prompt, so we slice it off to just get the new tokens
-        generated_ids = output_sequence[0][input_tensor.shape[1]:].tolist()
+        # generated_ids = output_sequence[0][input_tensor.shape[1]:].tolist()
 
         # 6. Decode the generated tokens back to characters
         pred_plain = "".join([id_to_char.get(idx, "?") for idx in generated_ids])
