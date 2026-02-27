@@ -36,6 +36,15 @@ class Config:
     packing: bool = True
     torch_compile: bool = True
     bf16: bool = True
+    
+    @property
+    def hidden_size(self):
+        return self.dims
+        
+    @property
+    def intermediate_size(self):
+        # SwiGLU usually expands the intermediate dim by 4x or 8/3x
+        return self.dims * 4
 
     # TRAINING
     batch_size: int = 1 # Per device (will be packed)

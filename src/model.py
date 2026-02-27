@@ -185,7 +185,7 @@ class CustomLayer(nn.Module):
         self.attention = BlockSlidingWindowAttention(config)
         
         if LIGER_AVAILABLE and config.use_liger:
-            self.mlp = LigerSwiGLUMLP(config.dims)
+            self.mlp = LigerSwiGLUMLP(config) 
             self.att_norm = LigerRMSNorm(config.dims)
             self.mlp_norm = LigerRMSNorm(config.dims)
         else:
@@ -224,10 +224,7 @@ class RecurrenceModel(nn.Module):
         if LIGER_AVAILABLE and config.use_liger:
             self.norm = LigerRMSNorm(config.dims)
             # Liger Fused Head handles the final projection AND loss efficiently
-            self.output_head = LigerFusedLinearCrossEntropyLoss(
-                input_dim=config.dims,
-                num_classes=config.vocab_size
-            )
+            self.output_head = LigerFusedLinearCrossEntropyLoss()
         else:
             self.norm = nn.RMSNorm(config.dims)
             self.output_head = nn.Linear(config.dims, config.vocab_size, bias=False)
@@ -247,12 +244,12 @@ class RecurrenceModel(nn.Module):
         if labels is not None:
             # If using Liger Fused Loss, we pass the hidden states directly
             if LIGER_AVAILABLE and self.config.use_liger:
-                # Shift labels for CausalLM: input t predicts label t+1
                 shift_hidden = x[..., :-1, :].contiguous()
                 shift_labels = labels[..., 1:].contiguous()
                 
-                # Reshape for loss
+                # Pass the embedding weight matrix, hidden states, and labels
                 loss = self.output_head(
+                    self.embed.weight, 
                     shift_hidden.view(-1, self.config.dims), 
                     shift_labels.view(-1)
                 )
