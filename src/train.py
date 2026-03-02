@@ -1,5 +1,6 @@
 import os
 import torch
+import torch.nn.functional as F
 from datasets import load_from_disk
 from torch.utils.data import Dataset
 from model import get_model
@@ -54,33 +55,32 @@ class ArrowDatasetWrapper(Dataset):
             "labels": torch.tensor(input_ids, dtype=torch.long)
         }
 
-def packing_collate(batch):
+def pad_collate(batch):
     """
-    Concatenates all sequences into one long buffer.
-    In a real implementation we would preserve 'cu_seqlens' and pass it to the model 
-    to reset attention masks. Our 'BlockSlidingWindowAttention' currently assumes 
-    continuous relative positions or standard padding. 
-    
-    For now, we simply pad to the longest in the batch to be safe with the custom attention
-    Wait: The Plan calls for Packing.
+    Pads sequences to the longest sequence in the current batch.
+    Prevents cross-document contamination and uses -100 to mask padding from the loss.
     """
-    # 1. Concatenate inputs
-    concat_input = torch.cat([item["input_ids"] for item in batch])
-    concat_label = torch.cat([item["labels"] for item in batch])
+    # Find the max length in this specific batch (dynamic padding saves memory)
+    max_len = max(len(item["input_ids"]) for item in batch)
     
-    # Trim to nearest multiple of window size to avoid shape errors
-    r = len(concat_input) % cfg.window_size
-    if r != 0:
-        concat_input = concat_input[:-r]
-        concat_label = concat_label[:-r]
+    padded_inputs = []
+    padded_labels = []
+    
+    for item in batch:
+        pad_len = max_len - len(item["input_ids"])
         
-    # Check if we are too small (rare)
-    if len(concat_input) == 0:
-        return batch[0] # Fallback
+        # Pad input_ids with 0 (or any safe vocab token)
+        inputs = F.pad(item["input_ids"], (0, pad_len), value=0)
+        
+        # Pad labels with -100 so the CrossEntropyLoss completely ignores them
+        labels = F.pad(item["labels"], (0, pad_len), value=-100)
+        
+        padded_inputs.append(inputs)
+        padded_labels.append(labels)
         
     return {
-        "input_ids": concat_input.unsqueeze(0), # Add batch dim [1, Seq]
-        "labels": concat_label.unsqueeze(0)
+        "input_ids": torch.stack(padded_inputs), # Shape: [batch_size, max_len]
+        "labels": torch.stack(padded_labels)     # Shape: [batch_size, max_len]
     }
 
 def train():
@@ -122,7 +122,7 @@ def train():
         args=train_args,
         train_dataset=train_ds,
         eval_dataset=test_ds,
-        data_collator=packing_collate
+        data_collator=pad_collate
     )
 
     print(f"Starting training on {torch.cuda.device_count()} GPUs...")
