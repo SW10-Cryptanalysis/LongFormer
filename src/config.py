@@ -51,11 +51,11 @@ class Config:
     batch_size: int = 4
     grad_accum: int = 8
     learning_rate: float = 2e-4
-    epochs: int = 1
+    epochs: int = 5
     grad_checkpoint: bool = True
-    log_steps: int = 100
-    save_steps: int = 1000
-    eval_steps: int = 5000
+    log_steps: int = 50
+    save_steps: int = 500
+    eval_steps: int = 1000
 
     # SYSTEM
     output_dir: Path = OUTPUT_DIR
