@@ -9,12 +9,22 @@ from config import cfg
 # Force expanded segments for fragmentation
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
+## train.py (Partial Update)
 class ArrowDatasetWrapper(Dataset):
     def __init__(self, directory_path):
         # Load the Hugging Face Arrow dataset natively
         self.hf_dataset = load_from_disk(str(directory_path))
         if len(self.hf_dataset) == 0:
             print(f"Warning: Dataset at {directory_path} is empty.")
+            
+        # Setup tokenization (matching evaluate.py)
+        self.max_homophone = cfg.unique_homophones 
+        self.sep_token = self.max_homophone + 1
+        char_offset = self.sep_token + 1
+        chars = "abcdefghijklmnopqrstuvwxyz "
+        
+        # Create character to ID mapping for the plaintext
+        self.char_to_id = {char: i + char_offset for i, char in enumerate(chars)}
 
     def __len__(self):
         return len(self.hf_dataset)
@@ -23,14 +33,22 @@ class ArrowDatasetWrapper(Dataset):
         # Access the row directly from the Arrow dataset
         data = self.hf_dataset[idx]
         
-        # Parse integers from the string
-        input_ids = [int(x) for x in data["ciphertext"].split()]
+        # 1. Parse Ciphertext integers from the string
+        cipher_ids = [int(x) for x in data["ciphertext"].split()]
+        
+        # 2. Parse Plaintext characters into Token IDs
+        plain_text = data.get("plaintext", "")
+        # Use 0 (or another designated token) as a fallback for unknown characters
+        plain_ids = [self.char_to_id.get(char, 0) for char in plain_text] 
+        
+        # 3. Concatenate: [Cipher] + [SEP] + [Plaintext]
+        input_ids = cipher_ids + [self.sep_token] + plain_ids
         
         # Ensure we don't exceed max context
         if len(input_ids) > cfg.max_context:
             input_ids = input_ids[:cfg.max_context]
             
-        # For CausalLM, labels are same as input
+        # For CausalLM optimizing the joint distribution, labels are same as input
         return {
             "input_ids": torch.tensor(input_ids, dtype=torch.long),
             "labels": torch.tensor(input_ids, dtype=torch.long)
@@ -116,10 +134,6 @@ def train():
     output_path = str(cfg.output_dir) + "/final_model"
     os.makedirs(output_path, exist_ok=True)
     torch.save(model_state, output_path + "/pytorch_model.bin")
-    
-    # Also save config
-    # with open(output_path + "/config.json", "w") as f:
-    #     json.dump(asdict(cfg), f)
 
 if __name__ == "__main__":
     train()

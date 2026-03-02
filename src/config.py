@@ -22,9 +22,9 @@ class Config:
     # ARCHITECTURE
     # Vocab size needs to be large enough for max recurrence distance (which is seq_len)
     # plus 30 output chars + special tokens.
-    unique_homophones: int = 8192
+    unique_homophones: int = 2500
     max_context: int = TOTAL_SEQ
-    vocab_size: int = 16500 
+    vocab_size: int = 2560 # Padded to mulitple of 64
     dims: int = 512
     layers: int = 16
     att_heads: int = 8 
