@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,12 +7,14 @@ from config import cfg
 
 # 1. Try importing Flash Attention
 try:
-    from flash_attn import flash_attn_func
+    from flash_attn import flash_attn_varlen_func
     FLASH_ATTN_AVAILABLE = True
-    print("FlashAttention-2 loaded successfully.")
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        print("FlashAttention-2 Varlen loaded successfully.")
 except ImportError:
     FLASH_ATTN_AVAILABLE = False
-    print("FlashAttention-2 not found. Will fallback to PyTorch Native SDPA.")
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        print("FlashAttention-2 not found. Will fallback to PyTorch Native SDPA.")
 
 # Try importing Liger Kernel optimizations
 try:
@@ -21,10 +24,12 @@ try:
         LigerSwiGLUMLP
     )
     LIGER_AVAILABLE = True
-    print("Liger Kernel loaded successfully.")
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        print("Liger Kernel loaded successfully.")
 except ImportError:
     LIGER_AVAILABLE = False
-    print("Liger Kernel not found. Using standard PyTorch implementations.")
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        print("Liger Kernel not found. Using standard PyTorch implementations.")
 
 class RotatedEmbedding(nn.Module):
     def __init__(self, dim, base=10000):
@@ -32,31 +37,32 @@ class RotatedEmbedding(nn.Module):
         inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
         self.register_buffer("inv_freq", inv_freq)
 
-    def forward(self, x, seq_len=None):
-        # x: [batch, seq_len, heads, head_dim]
-        # Create position indices based on absolute position in the packed sequence causes issues
-        # because we reset 'cu_seqlens'. But for RoPE in a sliding window, relative local is key.
-        # Here we assume causal absolute positions provided by caller or inferred.
-        if seq_len is None:
-            seq_len = x.shape[1]
-            
-        t = torch.arange(seq_len, device=x.device, dtype=self.inv_freq.dtype)
-        freqs = torch.outer(t, self.inv_freq)
-        emb = torch.cat((freqs, freqs), dim=-1)
-        return emb.unsqueeze(0).unsqueeze(2) # [1, seq, 1, dim]
+def get_varlen_position_ids(cu_seqlens, total_seq_len, device):
+    """
+    Generates correct absolute position IDs for a concatenated 1D batch.
+    Resets to 0 at the start of every new document.
+    """
+    pos_ids = torch.zeros(total_seq_len, dtype=torch.long, device=device)
+    for i in range(len(cu_seqlens) - 1):
+        start = cu_seqlens[i].item()
+        end = cu_seqlens[i+1].item()
+        pos_ids[start:end] = torch.arange(end - start, device=device)
+    return pos_ids
 
 def rotate_half(x):
     x1, x2 = x[..., :x.shape[-1]//2], x[..., x.shape[-1]//2:]
     return torch.cat((-x2, x1), dim=-1)
 
 def apply_rope(x, freqs):
-    # freqs: [1, seq, 1, dim]
-    return (x * freqs.cos()) + (rotate_half(x) * freqs.sin())
+    # Cast trigonometric functions to match input dtype to avoid float32 promotion overhead
+    cos = freqs.cos().to(x.dtype)
+    sin = freqs.sin().to(x.dtype)
+    return (x * cos) + (rotate_half(x) * sin)
 
 class FlashAttentionLayer(nn.Module):
     """
-    Implements exact O(N^2) attention using FlashAttention-2.
-    Removes chunking overhead and processes 16k tokens efficiently in SRAM.
+    Implements exact O(N^2) attention using FlashAttention-2 Varlen.
+    Removes chunking and padding overhead.
     """
     def __init__(self, config):
         super().__init__()
@@ -70,45 +76,42 @@ class FlashAttentionLayer(nn.Module):
         self.v_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
         self.o_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
 
-    def forward(self, hidden_states, cu_seqlens=None, **kwargs):
-        batch, seq_len, dim = hidden_states.shape
+    def forward(self, hidden_states, cu_seqlens=None, max_seqlen=None, **kwargs):
+        # In varlen mode, hidden_states is [total_tokens, dim]
+        total_tokens, dim = hidden_states.shape
         
         # Project Q, K, V
-        # Shape: [batch, seq_len, num_heads, head_dim]
-        q = self.q_proj(hidden_states).view(batch, seq_len, self.num_heads, self.head_dim)
-        k = self.k_proj(hidden_states).view(batch, seq_len, self.num_heads, self.head_dim)
-        v = self.v_proj(hidden_states).view(batch, seq_len, self.num_heads, self.head_dim)
+        q = self.q_proj(hidden_states).view(total_tokens, self.num_heads, self.head_dim)
+        k = self.k_proj(hidden_states).view(total_tokens, self.num_heads, self.head_dim)
+        v = self.v_proj(hidden_states).view(total_tokens, self.num_heads, self.head_dim)
 
-        # Apply RoPE
-        freqs = self.rope(q, seq_len)
-        q = apply_rope(q, freqs)
-        k = apply_rope(k, freqs)
-
-        # FlashAttention-2 requires inputs to be half-precision (fp16 or bf16)
-        if q.dtype not in [torch.float16, torch.bfloat16]:
-            target_dtype = torch.bfloat16 if cfg.bf16 else torch.float16
-            q, k, v = q.to(target_dtype), k.to(target_dtype), v.to(target_dtype)
+        # Apply RoPE dynamically based on 1D packed sequences
+        if cu_seqlens is not None:
+            pos_ids = get_varlen_position_ids(cu_seqlens, total_tokens, hidden_states.device)
+            freqs = self.rope.inv_freq.to(hidden_states.device)
+            freqs = torch.outer(pos_ids, freqs)
+            emb = torch.cat((freqs, freqs), dim=-1).unsqueeze(1) # [total_tokens, 1, head_dim]
+            
+            q = apply_rope(q, emb)
+            k = apply_rope(k, emb)
 
         # Compute Attention
-        if FLASH_ATTN_AVAILABLE:
-            # flash_attn_func handles causal masking natively and optimally
-            attn_output = flash_attn_func(q, k, v, dropout_p=0.0, causal=True)
-        else:
-            # Fallback to PyTorch Native SDPA (which also triggers FlashAttention under the hood on newer PyTorch)
-            # SDPA expects shape: [batch, num_heads, seq_len, head_dim]
-            q_sdpa = q.transpose(1, 2)
-            k_sdpa = k.transpose(1, 2)
-            v_sdpa = v.transpose(1, 2)
-            
-            attn_output = F.scaled_dot_product_attention(
-                q_sdpa, k_sdpa, v_sdpa, 
-                is_causal=True
+        if FLASH_ATTN_AVAILABLE and cu_seqlens is not None:
+            attn_output = flash_attn_varlen_func(
+                q, k, v, 
+                cu_seqlens_q=cu_seqlens, 
+                cu_seqlens_k=cu_seqlens, 
+                max_seqlen_q=max_seqlen, 
+                max_seqlen_k=max_seqlen, 
+                dropout_p=0.0, 
+                causal=True
             )
-            # Back to [batch, seq_len, num_heads, head_dim]
-            attn_output = attn_output.transpose(1, 2)
+        else:
+            # Fallback to PyTorch SDPA (Standard 2D padding logic would go here if FA fails)
+            raise NotImplementedError("Varlen currently requires FlashAttention-2. Ensure you are on a compatible GPU.")
 
         # Reshape and project out
-        attn_output = attn_output.contiguous().view(batch, seq_len, self.hidden_size)
+        attn_output = attn_output.contiguous().view(total_tokens, self.hidden_size)
         return self.o_proj(attn_output)
 
 class CustomLayer(nn.Module):
@@ -121,7 +124,6 @@ class CustomLayer(nn.Module):
             self.att_norm = LigerRMSNorm(config.dims)
             self.mlp_norm = LigerRMSNorm(config.dims)
         else:
-            # Standard PyTorch Fallback
             self.mlp = nn.Sequential(
                 nn.Linear(config.dims, config.dims * 4),
                 nn.SiLU(),
@@ -131,7 +133,6 @@ class CustomLayer(nn.Module):
             self.mlp_norm = nn.RMSNorm(config.dims)
 
     def forward(self, x, **kwargs):
-        # Pre-Norm Architecture
         residual = x
         x = self.att_norm(x)
         x = self.attention(x, **kwargs)
@@ -161,23 +162,40 @@ class RecurrenceModel(nn.Module):
             self.norm = nn.RMSNorm(config.dims)
             self.output_head = nn.Linear(config.dims, config.vocab_size, bias=False)
             
-    
     def gradient_checkpointing_enable(self, **kwargs):
         self.gradient_checkpointing = True
 
     def gradient_checkpointing_disable(self):
         self.gradient_checkpointing = False
+    
+    def get_input_embeddings(self):
+        return self.embed
 
-    def forward(self, input_ids, output_hidden_states=False, labels=None, **kwargs):
-        # input_ids: Recurrence distance IDs [batch, seq]
+    def set_input_embeddings(self, value):
+        self.embed = value
+
+    def forward(self, input_ids, output_hidden_states=False, labels=None, cu_seqlens=None, max_seqlen=None, **kwargs):
+        # Unpack the dummy batch dimension created by the collator
+        if input_ids.dim() == 2 and input_ids.shape[0] == 1 and cu_seqlens is not None:
+            input_ids = input_ids.squeeze(0)
+            if labels is not None:
+                labels = labels.squeeze(0)
+            cu_seqlens = cu_seqlens.squeeze(0)
+            max_seqlen = max_seqlen.item()
+            
         x = self.embed(input_ids)
+        
+        # Crucial for gradient checkpointing with frozen/integer inputs
+        if self.gradient_checkpointing and self.training:
+            x.requires_grad_(True)
+        
+        layer_kwargs = {"cu_seqlens": cu_seqlens, "max_seqlen": max_seqlen}
         
         for layer in self.layers:
             if self.gradient_checkpointing and self.training:
-                # use_reentrant=False is the modern, safer PyTorch implementation
-                x = checkpoint.checkpoint(layer, x, use_reentrant=False, **kwargs)
+                x = checkpoint.checkpoint(layer, x, use_reentrant=False, **layer_kwargs)
             else:
-                x = layer(x, **kwargs)
+                x = layer(x, **layer_kwargs)
             
         x = self.norm(x)
         
@@ -185,39 +203,47 @@ class RecurrenceModel(nn.Module):
         logits = None
         
         if labels is not None:
-            # If using Liger Fused Loss, we pass the hidden states directly
+            # Shift for Causal LM
+            shift_hidden = x[:-1, :].contiguous()
+            shift_labels = labels[1:].contiguous().clone() # Clone to safely modify
+            
+            # --- THE BOUNDARY MASK ---
+            # Prevent the end of Document A from predicting the start of Document B
+            if cu_seqlens is not None and len(cu_seqlens) > 2:
+                # cu_seqlens is e.g., [0, 4000, 10000]
+                # We need to mask index 3999 in the shifted labels
+                boundary_indices = cu_seqlens[1:-1] - 1
+                shift_labels[boundary_indices] = -100
+
             if LIGER_AVAILABLE and self.config.use_liger:
-                shift_hidden = x[..., :-1, :].contiguous()
-                shift_labels = labels[..., 1:].contiguous()
-                
-                # Pass the embedding weight matrix, hidden states, and labels
                 loss = self.output_head(
                     self.embed.weight, 
-                    shift_hidden.view(-1, self.config.dims), 
-                    shift_labels.view(-1)
+                    shift_hidden, 
+                    shift_labels
                 )
             else:
-                logits = self.output_head(x)
-                shift_logits = logits[..., :-1, :].contiguous()
-                shift_labels = labels[..., 1:].contiguous()
+                logits = self.output_head(shift_hidden)
                 loss_fct = nn.CrossEntropyLoss()
-                loss = loss_fct(shift_logits.view(-1, self.config.vocab_size), shift_labels.view(-1))
+                loss = loss_fct(logits, shift_labels)
         
         if logits is None and not self.training:
-             # Basic inference support
              if hasattr(self.output_head, "lin"):
                  logits = self.output_head.lin(x)
              else:
-                 # In standard mode, output_head is Linear
                  logits = self.output_head(x) if not isinstance(self.output_head, LigerFusedLinearCrossEntropyLoss) else torch.matmul(x, self.embed.weight.t())
+
+        # Repack dummy batch dimension to keep HF Trainer happy during evaluation/logging
+        if logits is not None:
+            logits = logits.unsqueeze(0)
 
         return {
             "loss": loss,
             "logits": logits,
-            "hidden_states": x if output_hidden_states else None
+            "hidden_states": x.unsqueeze(0) if output_hidden_states else None
         }
 
 def get_model():
     model = RecurrenceModel(cfg)
-    print(f"Custom Model Params: {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M")
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        print(f"Custom Model Params: {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M")
     return model
