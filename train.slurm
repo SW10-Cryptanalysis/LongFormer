@@ -22,6 +22,9 @@ nvidia-smi | tee -a logs/train_live_${SLURM_JOB_ID}.log
 export PATH="$HOME/.local/bin:$PATH"
 export OMP_NUM_THREADS=8
 
+# Install flash-attention directly from the target wheel URL
+uv pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
+
 # Use torchrun to launch distributed training on 4 GPUs
 uv run torchrun --nproc_per_node=4 src/train.py 2>&1 | tee -a logs/train_live_${SLURM_JOB_ID}.log
 

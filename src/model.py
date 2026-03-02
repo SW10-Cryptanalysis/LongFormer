@@ -2,8 +2,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
-import math
 from config import cfg
+
+# 1. Try importing Flash Attention
+try:
+    from flash_attn import flash_attn_func
+    FLASH_ATTN_AVAILABLE = True
+    print("FlashAttention-2 loaded successfully.")
+except ImportError:
+    FLASH_ATTN_AVAILABLE = False
+    print("FlashAttention-2 not found. Will fallback to PyTorch Native SDPA.")
 
 # Try importing Liger Kernel optimizations
 try:
@@ -45,114 +53,68 @@ def apply_rope(x, freqs):
     # freqs: [1, seq, 1, dim]
     return (x * freqs.cos()) + (rotate_half(x) * freqs.sin())
 
-class BlockSlidingWindowAttention(nn.Module):
+class FlashAttentionLayer(nn.Module):
     """
-    Implements O(N * W) attention by chunking the sequence into blocks of size window_size.
-    Each block attends to itself and the previous block (Total window = 2 * window_size).
-    Standard Softmax attention is applied for sharp deterministic mappings.
+    Implements exact O(N^2) attention using FlashAttention-2.
+    Removes chunking overhead and processes 16k tokens efficiently in SRAM.
     """
     def __init__(self, config):
         super().__init__()
         self.hidden_size = config.dims
         self.num_heads = config.att_heads
         self.head_dim = config.dims // config.att_heads
-        self.window_size = config.window_size
         self.rope = RotatedEmbedding(self.head_dim, config.rope_theta)
         
         self.q_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
         self.k_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
         self.v_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
         self.o_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
-        
-        # NOTE: ALiBi slopes removed. RoPE handles relative positioning implicitly.
 
     def forward(self, hidden_states, cu_seqlens=None, **kwargs):
-        # hidden_states: [batch, total_seq_len, dim] (Packed)
         batch, seq_len, dim = hidden_states.shape
-        seq_len_scalar = int(seq_len)
         
-        q = self.q_proj(hidden_states).view(batch, seq_len_scalar, self.num_heads, self.head_dim)
-        k = self.k_proj(hidden_states).view(batch, seq_len_scalar, self.num_heads, self.head_dim)
-        v = self.v_proj(hidden_states).view(batch, seq_len_scalar, self.num_heads, self.head_dim)
+        # Project Q, K, V
+        # Shape: [batch, seq_len, num_heads, head_dim]
+        q = self.q_proj(hidden_states).view(batch, seq_len, self.num_heads, self.head_dim)
+        k = self.k_proj(hidden_states).view(batch, seq_len, self.num_heads, self.head_dim)
+        v = self.v_proj(hidden_states).view(batch, seq_len, self.num_heads, self.head_dim)
 
         # Apply RoPE
-        freqs = self.rope(q, seq_len_scalar)
+        freqs = self.rope(q, seq_len)
         q = apply_rope(q, freqs)
         k = apply_rope(k, freqs)
 
-        # Chunking Strategy for O(N) Complexity
-        w = self.window_size
-        bsz, seq_len, _, _ = q.shape
-        
-        # Calculate padding needed
-        pad_len = (w - (seq_len % w)) % w
-        
-        if pad_len > 0:
-            q = F.pad(q, (0,0,0,0,0,pad_len))
-            k = F.pad(k, (0,0,0,0,0,pad_len))
-            v = F.pad(v, (0,0,0,0,0,pad_len))
-        
-        padded_len = q.shape[1]
-             
-        num_chunks = int(padded_len // w)
-        
-        # Reshape to [batch, num_chunks, window_size, heads, dim]
-        q_chunks = q.reshape(batch, num_chunks, w, self.num_heads, self.head_dim)
-        k_chunks = k.reshape(batch, num_chunks, w, self.num_heads, self.head_dim)
-        v_chunks = v.reshape(batch, num_chunks, w, self.num_heads, self.head_dim)
+        # FlashAttention-2 requires inputs to be half-precision (fp16 or bf16)
+        if q.dtype not in [torch.float16, torch.bfloat16]:
+            target_dtype = torch.bfloat16 if cfg.bf16 else torch.float16
+            q, k, v = q.to(target_dtype), k.to(target_dtype), v.to(target_dtype)
 
-        out_chunks = []
-        
-        for i in range(num_chunks):
-            q_i = q_chunks[:, i]     # [b, w, h, d]
+        # Compute Attention
+        if FLASH_ATTN_AVAILABLE:
+            # flash_attn_func handles causal masking natively and optimally
+            attn_output = flash_attn_func(q, k, v, dropout_p=0.0, causal=True)
+        else:
+            # Fallback to PyTorch Native SDPA (which also triggers FlashAttention under the hood on newer PyTorch)
+            # SDPA expects shape: [batch, num_heads, seq_len, head_dim]
+            q_sdpa = q.transpose(1, 2)
+            k_sdpa = k.transpose(1, 2)
+            v_sdpa = v.transpose(1, 2)
             
-            # Key/Value is concat of prev and curr
-            if i == 0:
-                k_cat = k_chunks[:, i] # [b, w, h, d]
-                v_cat = v_chunks[:, i]
-            else:
-                k_cat = torch.cat([k_chunks[:, i-1], k_chunks[:, i]], dim=1) # [b, 2w, h, d]
-                v_cat = torch.cat([v_chunks[:, i-1], v_chunks[:, i]], dim=1)
-                
-            # Attention scores: Q @ K.T
-            # [b, w, h, d] @ [b, h, d, 2w] -> [b, h, w, 2w]
-            attn_scores = torch.einsum("bwhd,bkhd->bhwk", q_i, k_cat)
-            attn_scores = attn_scores / math.sqrt(self.head_dim)
-            
-            # Causal Masking (Critical)
-            if i == 0:
-                 mask = torch.triu(torch.ones(w, w, device=q.device), diagonal=1).bool()
-                 attn_scores.masked_fill_(mask.unsqueeze(0).unsqueeze(0), float('-inf'))
-                 # NOTE: ALiBi Local removed.
-                 
-            else:
-                causal_part = torch.triu(torch.ones(w, w, device=q.device), diagonal=1).bool()
-                full_mask = torch.cat([torch.zeros(w, w, dtype=torch.bool, device=q.device), causal_part], dim=1)
-                attn_scores.masked_fill_(full_mask.unsqueeze(0).unsqueeze(0), float('-inf'))
-                # NOTE: ALiBi Relative removed.
+            attn_output = F.scaled_dot_product_attention(
+                q_sdpa, k_sdpa, v_sdpa, 
+                is_causal=True
+            )
+            # Back to [batch, seq_len, num_heads, head_dim]
+            attn_output = attn_output.transpose(1, 2)
 
-            # STANDARD SOFTMAX ATTENTION (Replaces Sigmoid)
-            # Computed over the key dimension (dim=-1)
-            attn_probs = F.softmax(attn_scores, dim=-1)
-            
-            # Output
-            out = torch.matmul(attn_probs, v_cat.transpose(1, 2)).transpose(1, 2)
-            out_chunks.append(out)
-
-        # Reassemble
-        output = torch.cat(out_chunks, dim=1)
-        
-        # Remove padding
-        if pad_len > 0:
-            output = output[:, :seq_len, :, :]
-            
-        output = output.reshape(batch, seq_len, self.hidden_size)
-        return self.o_proj(output)
+        # Reshape and project out
+        attn_output = attn_output.contiguous().view(batch, seq_len, self.hidden_size)
+        return self.o_proj(attn_output)
 
 class CustomLayer(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.attention = BlockSlidingWindowAttention(config)
+        self.attention = FlashAttentionLayer(config)
         
         if LIGER_AVAILABLE and config.use_liger:
             self.mlp = LigerSwiGLUMLP(config) 
