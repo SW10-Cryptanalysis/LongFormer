@@ -63,7 +63,7 @@ def varlen_collate(batch):
     flat_labels = torch.cat(labels).unsqueeze(0)
     
     # Cumulative Sequence Lengths (required for FlashAttention)
-    cu_seqlens = torch.tensor([0] + seqlens, dtype=torch.int32).cumsum(dim=0)
+    cu_seqlens = torch.tensor([0] + seqlens, dtype=torch.int32).cumsum(dim=0, dtype=torch.int32)
     max_seqlen = max(seqlens)
     
     return {

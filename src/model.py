@@ -97,6 +97,8 @@ class FlashAttentionLayer(nn.Module):
 
         # Compute Attention
         if FLASH_ATTN_AVAILABLE and cu_seqlens is not None:
+            cu_seqlens = cu_seqlens.to(torch.int32)
+            
             attn_output = flash_attn_varlen_func(
                 q, k, v, 
                 cu_seqlens_q=cu_seqlens, 
