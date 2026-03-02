@@ -96,9 +96,7 @@ def train():
         dataloader_num_workers=4,
         
         # DDP/FSDP
-        # For 4x L4, we want FSDP to shard the model states
-        fsdp="",
-        fsdp_config=None,
+        ddp_find_unused_parameters=False,
     )
 
     trainer = Trainer(

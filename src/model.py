@@ -49,7 +49,7 @@ class BlockSlidingWindowAttention(nn.Module):
     """
     Implements O(N * W) attention by chunking the sequence into blocks of size window_size.
     Each block attends to itself and the previous block (Total window = 2 * window_size).
-    Sigmoid attention is applied.
+    Standard Softmax attention is applied for sharp deterministic mappings.
     """
     def __init__(self, config):
         super().__init__()
@@ -64,19 +64,11 @@ class BlockSlidingWindowAttention(nn.Module):
         self.v_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
         self.o_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
         
-        # ALiBi Slopes
-        m = torch.tensor(
-            [2 ** (-8 / self.num_heads * i) for i in range(1, self.num_heads + 1)],
-            dtype=torch.float32
-        )
-        self.register_buffer("alibi_slopes", m)
+        # NOTE: ALiBi slopes removed. RoPE handles relative positioning implicitly.
 
     def forward(self, hidden_states, cu_seqlens=None, **kwargs):
-        # hidden_states: [batch=1, total_seq_len, dim] (Packed)
-        # We assume batch size 1 flattened or properly collated.
+        # hidden_states: [batch, total_seq_len, dim] (Packed)
         batch, seq_len, dim = hidden_states.shape
-        
-        # Cast seq_len to int for clarity
         seq_len_scalar = int(seq_len)
         
         q = self.q_proj(hidden_states).view(batch, seq_len_scalar, self.num_heads, self.head_dim)
@@ -89,7 +81,6 @@ class BlockSlidingWindowAttention(nn.Module):
         k = apply_rope(k, freqs)
 
         # Chunking Strategy for O(N) Complexity
-        # We process in chunks of 'window_size'. 
         w = self.window_size
         bsz, seq_len, _, _ = q.shape
         
@@ -102,24 +93,16 @@ class BlockSlidingWindowAttention(nn.Module):
             v = F.pad(v, (0,0,0,0,0,pad_len))
         
         padded_len = q.shape[1]
-        
-        # Ensure we don't crash on very short sequences < window_size
-        if padded_len < w:
-             # Should be covered by pad_len logic (if seq_len < w, pad_len will make it w)
-             pass 
              
         num_chunks = int(padded_len // w)
         
         # Reshape to [batch, num_chunks, window_size, heads, dim]
-        # Use reshape instead of view to handle non-contiguous if needed, though F.pad usually returns new tensor
         q_chunks = q.reshape(batch, num_chunks, w, self.num_heads, self.head_dim)
         k_chunks = k.reshape(batch, num_chunks, w, self.num_heads, self.head_dim)
         v_chunks = v.reshape(batch, num_chunks, w, self.num_heads, self.head_dim)
 
         out_chunks = []
         
-        # We iterate chunks. Current chunk 'i' attends to 'i' and 'i-1'.
-        # This gives a receptive field of [w, 2w].
         for i in range(num_chunks):
             q_i = q_chunks[:, i]     # [b, w, h, d]
             
@@ -140,33 +123,19 @@ class BlockSlidingWindowAttention(nn.Module):
             if i == 0:
                  mask = torch.triu(torch.ones(w, w, device=q.device), diagonal=1).bool()
                  attn_scores.masked_fill_(mask.unsqueeze(0).unsqueeze(0), float('-inf'))
-                 
-                 # ALiBi (Local)
-                 q_pos = torch.arange(w, device=q.device).unsqueeze(1)
-                 k_pos = torch.arange(w, device=q.device).unsqueeze(0)
-                 rel_dist = (q_pos - k_pos).abs()
-                 attn_scores -= (rel_dist * self.alibi_slopes.view(1, -1, 1, 1)).to(attn_scores.dtype)
+                 # NOTE: ALiBi Local removed.
                  
             else:
-                # In the 2w block: first w is prev chunk, next w is curr chunk.
-                # Query (w) attends to [Prev(w), Curr(w)].
-                # The 'current' part is the right half. It needs causal mask.
-                
                 causal_part = torch.triu(torch.ones(w, w, device=q.device), diagonal=1).bool()
                 full_mask = torch.cat([torch.zeros(w, w, dtype=torch.bool, device=q.device), causal_part], dim=1)
                 attn_scores.masked_fill_(full_mask.unsqueeze(0).unsqueeze(0), float('-inf'))
-                
-                # ALiBi (Relative to chunks)
-                # K indices are shifted by -w relative to Q start
-                rel_dist = torch.arange(2*w, device=q.device).unsqueeze(0) - (torch.arange(w, device=q.device).unsqueeze(1) + w)
-                rel_dist = rel_dist.abs()
-                attn_scores -= (rel_dist * self.alibi_slopes.view(1, -1, 1, 1)).to(attn_scores.dtype)
+                # NOTE: ALiBi Relative removed.
 
-            # SIGMOID ATTENTION (SWAT) - No Softmax!
-            attn_probs = torch.sigmoid(attn_scores)
+            # STANDARD SOFTMAX ATTENTION (Replaces Sigmoid)
+            # Computed over the key dimension (dim=-1)
+            attn_probs = F.softmax(attn_scores, dim=-1)
             
             # Output
-            # [b, h, w, 2w] @ [b, 2w, h, d] -> [b, h, w, d] -> [b, w, h, d]
             out = torch.matmul(attn_probs, v_cat.transpose(1, 2)).transpose(1, 2)
             out_chunks.append(out)
 

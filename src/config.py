@@ -48,8 +48,8 @@ class Config:
         return self.dims * 4
 
     # TRAINING
-    batch_size: int = 1 # Per device (will be packed)
-    grad_accum: int = 8
+    batch_size: int = 8 # Per device (will be packed)
+    grad_accum: int = 2
     learning_rate: float = 2e-4
     epochs: int = 1
     grad_checkpoint: bool = False
