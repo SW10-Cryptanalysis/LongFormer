@@ -115,6 +115,8 @@ class CustomLayer(nn.Module):
         return x
 
 class RecurrenceModel(nn.Module):
+    _no_split_modules = ["CustomLayer"]
+    
     def __init__(self, config):
         super().__init__()
         self.config = config
@@ -192,19 +194,25 @@ class RecurrenceModel(nn.Module):
         logits = None
         
         if labels is not None:
+            # Autoregressive shift: predicts the n-th token from the (n-1)-th hidden state
             shift_hidden = x[:-1, :].contiguous()
             shift_labels = labels[1:].contiguous().clone()
             
+            # CRITICAL: Prevent the loss from penalizing the final token of one sequence 
+            # predicting the first token of the next sequence in a packed flat batch.
             if cu_seqlens is not None and len(cu_seqlens) > 2:
+                # cu_seqlens gives the start index of each sequence.
+                # Subtract 1 from the start indices of the 2nd through last sequences
+                # to target the exact position in the SHIFTED array.
                 boundary_indices = cu_seqlens[1:-1] - 1
                 shift_labels[boundary_indices] = -100
 
-            # Compute standard uniform cross-entropy loss
+            # Compute equal weighting cross-entropy loss over both C and P
             if LIGER_AVAILABLE and self.config.use_liger:
                 loss = self.output_head(self.embed.weight, shift_hidden, shift_labels)
             else:
                 logits_for_loss = self.output_head(shift_hidden)
-                loss_fct = nn.CrossEntropyLoss()
+                loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
                 loss = loss_fct(logits_for_loss, shift_labels)
             
         if not self.training:

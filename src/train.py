@@ -1,52 +1,17 @@
 import os
 import torch
 from datasets import load_from_disk
-from torch.utils.data import Dataset
 from transformers import Trainer, TrainingArguments
 from config import cfg
-from model import get_model
+from model import get_model 
 
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
-class ArrowDatasetWrapper(Dataset):
-    def __init__(self, directory_path):
-        self.hf_dataset = load_from_disk(str(directory_path))
-        
-        if len(self.hf_dataset) == 0 and int(os.environ.get("LOCAL_RANK", 0)) == 0:
-            print(f"Warning: Dataset at {directory_path} is empty.")
-            
-        self.max_homophone = cfg.unique_homophones 
-        self.sep_token = self.max_homophone + 1
-        self.unk_token = self.max_homophone + 2
-        
-        char_offset = self.unk_token + 1
-        chars = "abcdefghijklmnopqrstuvwxyz "
-        
-        self.char_to_id = {char: i + char_offset for i, char in enumerate(chars)}
-
-    def __len__(self):
-        return len(self.hf_dataset)
-
-    def __getitem__(self, idx):
-        data = self.hf_dataset[idx]
-        
-        cipher_ids = list(map(int, data["ciphertext"].split()))
-        plain_text = data.get("plaintext", "")
-        
-        plain_ids = [self.char_to_id.get(char, self.unk_token) for char in plain_text] 
-        input_ids = cipher_ids + [self.sep_token] + plain_ids
-            
-        if len(input_ids) > cfg.max_context:
-            if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                print(f"Safety constraint: Clipping sequence from {len(input_ids)} to {cfg.max_context}")
-            input_ids = input_ids[:cfg.max_context]
-            
-        return {
-            "input_ids": torch.tensor(input_ids, dtype=torch.long),
-            "labels": torch.tensor(input_ids, dtype=torch.long)
-        }
-
 def varlen_collate(batch):
+    """
+    Packs variable-length sequences into a single flat 1D tensor to bypass padding tokens.
+    Calculates cu_seqlens required by flash_attn_varlen_func.
+    """
     input_ids = []
     labels = []
     seqlens = []
@@ -54,19 +19,20 @@ def varlen_collate(batch):
     
     for item in batch:
         seq_len = len(item["input_ids"])
-        input_ids.append(item["input_ids"])
-        labels.append(item["labels"])
+        input_ids.append(torch.tensor(item["input_ids"], dtype=torch.long))
+        labels.append(torch.tensor(item["labels"], dtype=torch.long))
         seqlens.append(seq_len)
         
+        # Absolute positional IDs for RoPE
         pos_ids.append(torch.arange(seq_len, dtype=torch.long))
         
+    # Flatten across the batch
     flat_input_ids = torch.cat(input_ids).unsqueeze(0)
     flat_labels = torch.cat(labels).unsqueeze(0)
     flat_pos_ids = torch.cat(pos_ids).unsqueeze(0)
     
+    # Cumulative sequence lengths (starts with 0)
     cu_seqlens = torch.tensor([0] + seqlens, dtype=torch.int32).cumsum(dim=0, dtype=torch.int32)
-    
-    # Pass as a native Python int. HF Trainer will safely ignore it during `.to(device)` checks.
     actual_max_seqlen = max(seqlens)
     
     return {
@@ -77,11 +43,69 @@ def varlen_collate(batch):
         "max_seqlen": actual_max_seqlen
     }
 
+def get_datasets():
+    # 1. Check if we already have the NEW tokenized data saved
+    if os.path.exists(cfg.tokenized_data_dir) and os.path.exists(cfg.tokenized_test_dir):
+        if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+            print("Found Varlen-ready tokenized datasets! Loading from disk...")
+        train_ds = load_from_disk(str(cfg.tokenized_data_dir))
+        test_ds = load_from_disk(str(cfg.tokenized_test_dir))
+        return train_ds, test_ds
+
+    # 2. If not, load the raw Arrow datasets and tokenize
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        print("Tokenized datasets not found. Loading raw Arrow datasets...")
+        
+    train_ds = load_from_disk(str(cfg.data_dir))
+    test_ds = load_from_disk(str(cfg.test_dir))
+
+    max_homophone = cfg.unique_homophones 
+    sep_token = max_homophone + 1
+    unk_token = max_homophone + 2
+    char_offset = unk_token + 1
+    chars = "abcdefghijklmnopqrstuvwxyz "
+    char_to_id = {char: i + char_offset for i, char in enumerate(chars)}
+
+    def prepare_dataset(example):
+        cipher_ids = [int(x) for x in example["ciphertext"].split()]
+        plain_text = example.get("plaintext", "")
+        plain_ids = [char_to_id.get(char, unk_token) for char in plain_text] 
+        
+        # [C1, C2...][SEP][P1, P2...] format
+        input_ids = cipher_ids + [sep_token] + plain_ids
+        if len(input_ids) > cfg.max_context:
+            input_ids = input_ids[:cfg.max_context]
+            
+        return {"input_ids": input_ids, "labels": input_ids}
+
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        print("Tokenizing datasets with UNK offset (this will only happen once!)...")
+        
+    train_ds = train_ds.map(
+        prepare_dataset, 
+        num_proc=8, # Reduced slightly for 64GB RAM safety
+        remove_columns=train_ds.column_names
+    )
+    test_ds = test_ds.map(
+        prepare_dataset, 
+        num_proc=8, 
+        remove_columns=test_ds.column_names
+    )
+
+    # 3. Save to disk so subsequent runs load instantly
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        print(f"Saving tokenized training data to {cfg.tokenized_data_dir}...")
+        train_ds.save_to_disk(str(cfg.tokenized_data_dir))
+        print(f"Saving tokenized test data to {cfg.tokenized_test_dir}...")
+        test_ds.save_to_disk(str(cfg.tokenized_test_dir))
+
+    return train_ds, test_ds
+
 def train():
     model = get_model()
     
-    train_ds = ArrowDatasetWrapper(cfg.data_dir)
-    test_ds = ArrowDatasetWrapper(cfg.test_dir)
+    # Retrieve datasets (either loads cached or tokenizes and saves)
+    train_ds, test_ds = get_datasets()
 
     train_args = TrainingArguments(
         output_dir=str(cfg.output_dir),
@@ -94,11 +118,14 @@ def train():
         bf16=cfg.bf16,
         logging_steps=cfg.log_steps,
         save_steps=cfg.save_steps,
-        save_total_limit=2,
         eval_steps=cfg.eval_steps,
         torch_compile=cfg.torch_compile,
-        dataloader_num_workers=4,
-        ddp_find_unused_parameters=False,
+        dataloader_num_workers=8, 
+        dataloader_pin_memory=True,
+        fsdp="full_shard auto_wrap", 
+        fsdp_config={
+            "transformer_layer_cls_to_wrap": ["CustomLayer"],
+        },
     )
 
     trainer = Trainer(
@@ -109,23 +136,20 @@ def train():
         data_collator=varlen_collate
     )
 
+    # Check if there is a checkpoint to resume from
     last_checkpoint = None
     if os.path.isdir(cfg.output_dir):
         checkpoints = [d for d in os.listdir(cfg.output_dir) if d.startswith("checkpoint-")]
         if checkpoints:
             checkpoints.sort(key=lambda x: int(x.split('-')[1]))
             last_checkpoint = os.path.join(cfg.output_dir, checkpoints[-1])
-            print(f"Resuming from checkpoint: {last_checkpoint}")
+            if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+                print(f"Resuming from checkpoint: {last_checkpoint}")
 
     trainer.train(resume_from_checkpoint=last_checkpoint)
     
     if trainer.is_world_process_zero():
-        print("Saving final model...")
-        model_state = model.state_dict()
-        output_path = os.path.join(str(cfg.output_dir), "final_model")
-        os.makedirs(output_path, exist_ok=True)
-        torch.save(model_state, os.path.join(output_path, "pytorch_model.bin"))
-        print("Model saved successfully.")
+        trainer.save_model(os.path.join(str(cfg.output_dir), "final_model"))
 
 if __name__ == "__main__":
     train()

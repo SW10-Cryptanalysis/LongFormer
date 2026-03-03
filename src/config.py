@@ -7,12 +7,10 @@ TOTAL_SEQ = TEXT_LEN * 2
 DATA_DIR = Path(__file__).parent.parent.parent / "Ciphers"
 TRAINING_DIR = DATA_DIR / "Training_Arrow"
 TEST_DIR = DATA_DIR / "Test_Arrow"
-EVAL_DIR = DATA_DIR / "Test"
-VALIDATION_DIR = DATA_DIR / "Validation"
-TOKENIZED_DATA_DIR = DATA_DIR / "Training_Tokenized"
-TOKENIZED_TEST_DIR = DATA_DIR / "Test_Tokenized"
 
 OUTPUT_DIR = Path(__file__).parent.parent / "outputs"
+TOKENIZED_DATA_DIR = OUTPUT_DIR / "Training_Tokenized"
+TOKENIZED_TEST_DIR = OUTPUT_DIR / "Test_Tokenized"
 
 @dataclass
 class Config:
@@ -29,7 +27,7 @@ class Config:
     rope_theta: float = 10000.0
     use_liger: bool = True
     packing: bool = True
-    torch_compile: bool = False
+    torch_compile: bool = True 
     bf16: bool = True
     hidden_act: str = "silu"
     
@@ -42,8 +40,8 @@ class Config:
         return self.dims * 4
 
     # TRAINING
-    batch_size: int = 4
-    grad_accum: int = 8
+    batch_size: int = 2 
+    grad_accum: int = 16 
     learning_rate: float = 2e-4
     epochs: int = 3
     grad_checkpoint: bool = True
@@ -55,7 +53,6 @@ class Config:
     output_dir: Path = OUTPUT_DIR
     data_dir: Path = TRAINING_DIR
     test_dir: Path = TEST_DIR
-    eval_dir: Path = EVAL_DIR
     tokenized_data_dir: Path = TOKENIZED_DATA_DIR
     tokenized_test_dir: Path = TOKENIZED_TEST_DIR
 
