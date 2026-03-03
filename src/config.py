@@ -46,7 +46,7 @@ class Config:
     grad_accum: int = 8
     learning_rate: float = 2e-4
     epochs: int = 3
-    grad_checkpoint: bool = False
+    grad_checkpoint: bool = True
     log_steps: int = 50
     save_steps: int = 500
     eval_steps: int = 1000
