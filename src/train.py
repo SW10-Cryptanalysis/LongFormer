@@ -1,13 +1,11 @@
 import os
 import torch
-import torch.nn.functional as F
 from datasets import load_from_disk
 from torch.utils.data import Dataset
 from transformers import Trainer, TrainingArguments
 from config import cfg
 from model import get_model
 
-# Force expanded segments for fragmentation
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 class ArrowDatasetWrapper(Dataset):
@@ -17,10 +15,9 @@ class ArrowDatasetWrapper(Dataset):
         if len(self.hf_dataset) == 0 and int(os.environ.get("LOCAL_RANK", 0)) == 0:
             print(f"Warning: Dataset at {directory_path} is empty.")
             
-        # Token Space Definitions
         self.max_homophone = cfg.unique_homophones 
         self.sep_token = self.max_homophone + 1
-        self.unk_token = self.max_homophone + 2  # Added dedicated UNK token
+        self.unk_token = self.max_homophone + 2
         
         char_offset = self.unk_token + 1
         chars = "abcdefghijklmnopqrstuvwxyz "
@@ -36,20 +33,13 @@ class ArrowDatasetWrapper(Dataset):
         cipher_ids = [int(x) for x in data["ciphertext"].split()]
         plain_text = data.get("plaintext", "")
         
-        # Safe fallback to UNK token to prevent collision with cipher token 0
         plain_ids = [self.char_to_id.get(char, self.unk_token) for char in plain_text] 
-        
-        # Symmetric Truncation to preserve parallel data
-        max_half = (cfg.max_context - 1) // 2
-        
-        if len(cipher_ids) > max_half:
-            print(f"Truncating cipher_ids from {len(cipher_ids)} to {max_half}")
-            cipher_ids = cipher_ids[:max_half]
-        if len(plain_ids) > max_half:
-            print(f"Truncating plain_ids from {len(plain_ids)} to {max_half}")
-            plain_ids = plain_ids[:max_half]
-            
         input_ids = cipher_ids + [self.sep_token] + plain_ids
+            
+        if len(input_ids) > cfg.max_context:
+            if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+                print(f"Safety constraint: Clipping sequence from {len(input_ids)} to {cfg.max_context}")
+            input_ids = input_ids[:cfg.max_context]
             
         return {
             "input_ids": torch.tensor(input_ids, dtype=torch.long),
@@ -59,27 +49,33 @@ class ArrowDatasetWrapper(Dataset):
 def varlen_collate(batch):
     """
     Concatenates batch into a single flat sequence to eliminate padding.
-    Outputs dummy batch dim [1, total_tokens] to satisfy HF Trainer.
+    Now intelligently calculates position IDs purely on the CPU to avoid GPU syncs.
     """
     input_ids = []
     labels = []
     seqlens = []
+    pos_ids = []
     
     for item in batch:
+        seq_len = len(item["input_ids"])
         input_ids.append(item["input_ids"])
         labels.append(item["labels"])
-        seqlens.append(len(item["input_ids"]))
+        seqlens.append(seq_len)
+        
+        # Pre-compute absolute position IDs per document
+        pos_ids.append(torch.arange(seq_len, dtype=torch.long))
         
     flat_input_ids = torch.cat(input_ids).unsqueeze(0)
     flat_labels = torch.cat(labels).unsqueeze(0)
+    flat_pos_ids = torch.cat(pos_ids).unsqueeze(0)
     
-    # Cumulative Sequence Lengths (required for FlashAttention)
     cu_seqlens = torch.tensor([0] + seqlens, dtype=torch.int32).cumsum(dim=0, dtype=torch.int32)
     max_seqlen = max(seqlens)
     
     return {
         "input_ids": flat_input_ids,
         "labels": flat_labels,
+        "pos_ids": flat_pos_ids,
         "cu_seqlens": cu_seqlens.unsqueeze(0), 
         "max_seqlen": torch.tensor([max_seqlen], dtype=torch.int32)
     }
@@ -97,24 +93,14 @@ def train():
         gradient_accumulation_steps=cfg.grad_accum,
         learning_rate=cfg.learning_rate,
         weight_decay=0.01,
-        
-        # Checkpointing
         gradient_checkpointing=cfg.grad_checkpoint,
-        
-        # FP16/BF16
         bf16=cfg.bf16,
-        
-        # Logging
         logging_steps=cfg.log_steps,
         save_steps=cfg.save_steps,
         save_total_limit=2,
         eval_steps=cfg.eval_steps,
-        
-        # Performance
         torch_compile=cfg.torch_compile,
         dataloader_num_workers=4,
-        
-        # DDP/FSDP
         ddp_find_unused_parameters=False,
     )
 
@@ -126,7 +112,6 @@ def train():
         data_collator=varlen_collate
     )
 
-    # Check if there is a checkpoint to resume from
     last_checkpoint = None
     if os.path.isdir(cfg.output_dir):
         checkpoints = [d for d in os.listdir(cfg.output_dir) if d.startswith("checkpoint-")]
@@ -137,7 +122,6 @@ def train():
 
     trainer.train(resume_from_checkpoint=last_checkpoint)
     
-    # Safe Model Saving: Only main process writes to disk
     if trainer.is_world_process_zero():
         print("Saving final model...")
         model_state = model.state_dict()

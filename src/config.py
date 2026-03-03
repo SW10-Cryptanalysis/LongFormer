@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-# Constants matching roughly 16k context for recurrence distances
-# text_len = 8192, total_seq = 16384. 
-# We need vocab > 16384 to cover all possible recurrence distances.
-TEXT_LEN = 8_192
+# Constants expanded to cover the absolute maximum dataset length.
+# Max cipher length = ~9600. Combined max length = ~19200.
+# Context window raised to 20,000 to eliminate any truncation.
+TEXT_LEN = 10_000
 TOTAL_SEQ = TEXT_LEN * 2
 
 DATA_DIR = Path(__file__).parent.parent.parent / "Ciphers"
@@ -20,11 +20,9 @@ OUTPUT_DIR = Path(__file__).parent.parent / "outputs"
 @dataclass
 class Config:
     # ARCHITECTURE
-    # Vocab size needs to be large enough for max recurrence distance (which is seq_len)
-    # plus 30 output chars + special tokens.
     unique_homophones: int = 2500
-    max_context: int = TOTAL_SEQ
-    vocab_size: int = 2560 # Padded to mulitple of 64
+    max_context: int = TOTAL_SEQ  # Now correctly evaluates to 20,000
+    vocab_size: int = 2560 # Padded to multiple of 64 for optimal Tensor Core utilization
     dims: int = 512
     layers: int = 16
     att_heads: int = 8 
@@ -44,14 +42,13 @@ class Config:
         
     @property
     def intermediate_size(self):
-        # SwiGLU usually expands the intermediate dim by 4x or 8/3x
         return self.dims * 4
 
     # TRAINING
-    batch_size: int = 4
+    batch_size: int = 6
     grad_accum: int = 8
     learning_rate: float = 2e-4
-    epochs: int = 5
+    epochs: int = 3
     grad_checkpoint: bool = True
     log_steps: int = 50
     save_steps: int = 500
