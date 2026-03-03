@@ -1,9 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-# Constants expanded to cover the absolute maximum dataset length.
-# Max cipher length = ~9600. Combined max length = ~19200.
-# Context window raised to 20,000 to eliminate any truncation.
 TEXT_LEN = 10_000
 TOTAL_SEQ = TEXT_LEN * 2
 
@@ -21,8 +18,8 @@ OUTPUT_DIR = Path(__file__).parent.parent / "outputs"
 class Config:
     # ARCHITECTURE
     unique_homophones: int = 2500
-    max_context: int = TOTAL_SEQ  # Now correctly evaluates to 20,000
-    vocab_size: int = 2560 # Padded to multiple of 64 for optimal Tensor Core utilization
+    max_context: int = TOTAL_SEQ  
+    vocab_size: int = 2560 
     dims: int = 512
     layers: int = 16
     att_heads: int = 8 
@@ -45,8 +42,8 @@ class Config:
         return self.dims * 4
 
     # TRAINING
-    batch_size: int = 6
-    grad_accum: int = 8
+    batch_size: int = 4
+    grad_accum: int = 12
     learning_rate: float = 2e-4
     epochs: int = 3
     grad_checkpoint: bool = True
@@ -62,5 +59,4 @@ class Config:
     tokenized_data_dir: Path = TOKENIZED_DATA_DIR
     tokenized_test_dir: Path = TOKENIZED_TEST_DIR
 
-# Instantiate to use across other files
 cfg = Config()

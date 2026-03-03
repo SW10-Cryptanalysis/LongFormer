@@ -49,7 +49,7 @@ class ArrowDatasetWrapper(Dataset):
 def varlen_collate(batch):
     """
     Concatenates batch into a single flat sequence to eliminate padding.
-    Now intelligently calculates position IDs purely on the CPU to avoid GPU syncs.
+    Cleaned dict output removes the max_seqlen integer logic causing CPU syncs.
     """
     input_ids = []
     labels = []
@@ -62,7 +62,6 @@ def varlen_collate(batch):
         labels.append(item["labels"])
         seqlens.append(seq_len)
         
-        # Pre-compute absolute position IDs per document
         pos_ids.append(torch.arange(seq_len, dtype=torch.long))
         
     flat_input_ids = torch.cat(input_ids).unsqueeze(0)
@@ -70,14 +69,12 @@ def varlen_collate(batch):
     flat_pos_ids = torch.cat(pos_ids).unsqueeze(0)
     
     cu_seqlens = torch.tensor([0] + seqlens, dtype=torch.int32).cumsum(dim=0, dtype=torch.int32)
-    max_seqlen = max(seqlens)
     
     return {
         "input_ids": flat_input_ids,
         "labels": flat_labels,
         "pos_ids": flat_pos_ids,
-        "cu_seqlens": cu_seqlens.unsqueeze(0), 
-        "max_seqlen": torch.tensor([max_seqlen], dtype=torch.int32)
+        "cu_seqlens": cu_seqlens.unsqueeze(0)
     }
 
 def train():

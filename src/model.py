@@ -39,9 +39,8 @@ def rotate_half(x):
     x1, x2 = x[..., :x.shape[-1]//2], x[..., x.shape[-1]//2:]
     return torch.cat((-x2, x1), dim=-1)
 
-def apply_rope(x, freqs):
-    cos = freqs.cos().to(x.dtype)
-    sin = freqs.sin().to(x.dtype)
+def apply_rope(x, cos, sin):
+    # Optimized to accept pre-computed trig tensors
     return (x * cos) + (rotate_half(x) * sin)
 
 class FlashAttentionLayer(nn.Module):
@@ -50,28 +49,23 @@ class FlashAttentionLayer(nn.Module):
         self.hidden_size = config.dims
         self.num_heads = config.att_heads
         self.head_dim = config.dims // config.att_heads
-        self.rope = RotatedEmbedding(self.head_dim, config.rope_theta)
         
         self.q_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
         self.k_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
         self.v_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
         self.o_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
 
-    def forward(self, hidden_states, cu_seqlens=None, max_seqlen=None, pos_ids=None, **kwargs):
+    def forward(self, hidden_states, cu_seqlens=None, max_seqlen=None, cos=None, sin=None, **kwargs):
         total_tokens, dim = hidden_states.shape
         
         q = self.q_proj(hidden_states).view(total_tokens, self.num_heads, self.head_dim)
         k = self.k_proj(hidden_states).view(total_tokens, self.num_heads, self.head_dim)
         v = self.v_proj(hidden_states).view(total_tokens, self.num_heads, self.head_dim)
 
-        # Apply RoPE using the highly optimized pre-computed pos_ids
-        if pos_ids is not None:
-            freqs = self.rope.inv_freq.to(hidden_states.device)
-            freqs = torch.outer(pos_ids, freqs)
-            emb = torch.cat((freqs, freqs), dim=-1).unsqueeze(1) 
-            
-            q = apply_rope(q, emb)
-            k = apply_rope(k, emb)
+        # Apply pre-computed RoPE cleanly
+        if cos is not None and sin is not None:
+            q = apply_rope(q, cos, sin)
+            k = apply_rope(k, cos, sin)
 
         if FLASH_ATTN_AVAILABLE and cu_seqlens is not None:
             cu_seqlens = cu_seqlens.to(torch.int32)
@@ -127,6 +121,10 @@ class RecurrenceModel(nn.Module):
         self.embed = nn.Embedding(config.vocab_size, config.dims)
         self.gradient_checkpointing = False
         
+        # Centralized RoPE Instantiation
+        self.head_dim = config.dims // config.att_heads
+        self.rope = RotatedEmbedding(self.head_dim, config.rope_theta)
+        
         self.layers = nn.ModuleList([
             CustomLayer(config) for _ in range(config.layers)
         ])
@@ -150,13 +148,12 @@ class RecurrenceModel(nn.Module):
     def set_input_embeddings(self, value):
         self.embed = value
 
-    def forward(self, input_ids, output_hidden_states=False, labels=None, cu_seqlens=None, max_seqlen=None, pos_ids=None, **kwargs):
+    def forward(self, input_ids, output_hidden_states=False, labels=None, cu_seqlens=None, pos_ids=None, **kwargs):
         if input_ids.dim() == 2 and input_ids.shape[0] == 1 and cu_seqlens is not None:
             input_ids = input_ids.squeeze(0)
             if labels is not None:
                 labels = labels.squeeze(0)
             cu_seqlens = cu_seqlens.squeeze(0)
-            max_seqlen = max_seqlen.item()
             if pos_ids is not None:
                 pos_ids = pos_ids.squeeze(0)
             
@@ -164,8 +161,25 @@ class RecurrenceModel(nn.Module):
         
         if self.gradient_checkpointing and self.training:
             x.requires_grad_(True)
+            
+        # 1. Eliminate CPU syncs by providing a static max sequence bound for FA-2 block allocation
+        max_seqlen = self.config.max_context
         
-        layer_kwargs = {"cu_seqlens": cu_seqlens, "max_seqlen": max_seqlen, "pos_ids": pos_ids}
+        # 2. Compute RoPE Operations ONCE centrally to save immense VRAM and Tensor Core utilization
+        cos, sin = None, None
+        if pos_ids is not None:
+            inv_freq = self.rope.inv_freq.to(x.device)
+            freqs = torch.outer(pos_ids, inv_freq)
+            emb = torch.cat((freqs, freqs), dim=-1).unsqueeze(1)
+            cos = emb.cos().to(x.dtype)
+            sin = emb.sin().to(x.dtype)
+        
+        layer_kwargs = {
+            "cu_seqlens": cu_seqlens, 
+            "max_seqlen": max_seqlen, 
+            "cos": cos, 
+            "sin": sin
+        }
         
         for layer in self.layers:
             if self.gradient_checkpointing and self.training:
@@ -178,7 +192,6 @@ class RecurrenceModel(nn.Module):
         loss = None
         logits = None
         
-        # 1. Standardize Loss Computation (Shifted Tensors)
         if labels is not None:
             shift_hidden = x[:-1, :].contiguous()
             shift_labels = labels[1:].contiguous().clone()
@@ -194,7 +207,6 @@ class RecurrenceModel(nn.Module):
                 loss_fct = nn.CrossEntropyLoss()
                 loss = loss_fct(logits_for_loss, shift_labels)
         
-        # 2. Standardize Logits Computation (Unshifted Tensors, N Length)
         if not self.training:
             if isinstance(self.output_head, LigerFusedLinearCrossEntropyLoss):
                 logits = torch.matmul(x, self.embed.weight.t())
