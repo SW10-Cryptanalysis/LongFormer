@@ -43,10 +43,10 @@ class Config:
 
     # TRAINING
     batch_size: int = 4
-    grad_accum: int = 12
+    grad_accum: int = 8
     learning_rate: float = 2e-4
     epochs: int = 3
-    grad_checkpoint: bool = True
+    grad_checkpoint: bool = False
     log_steps: int = 50
     save_steps: int = 500
     eval_steps: int = 1000

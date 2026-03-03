@@ -40,7 +40,6 @@ def rotate_half(x):
     return torch.cat((-x2, x1), dim=-1)
 
 def apply_rope(x, cos, sin):
-    # Optimized to accept pre-computed trig tensors
     return (x * cos) + (rotate_half(x) * sin)
 
 class FlashAttentionLayer(nn.Module):
@@ -62,7 +61,6 @@ class FlashAttentionLayer(nn.Module):
         k = self.k_proj(hidden_states).view(total_tokens, self.num_heads, self.head_dim)
         v = self.v_proj(hidden_states).view(total_tokens, self.num_heads, self.head_dim)
 
-        # Apply pre-computed RoPE cleanly
         if cos is not None and sin is not None:
             q = apply_rope(q, cos, sin)
             k = apply_rope(k, cos, sin)
@@ -121,7 +119,6 @@ class RecurrenceModel(nn.Module):
         self.embed = nn.Embedding(config.vocab_size, config.dims)
         self.gradient_checkpointing = False
         
-        # Centralized RoPE Instantiation
         self.head_dim = config.dims // config.att_heads
         self.rope = RotatedEmbedding(self.head_dim, config.rope_theta)
         
@@ -148,7 +145,8 @@ class RecurrenceModel(nn.Module):
     def set_input_embeddings(self, value):
         self.embed = value
 
-    def forward(self, input_ids, output_hidden_states=False, labels=None, cu_seqlens=None, pos_ids=None, **kwargs):
+    # Signature updated to catch dynamic max_seqlen from Trainer collator dict
+    def forward(self, input_ids, output_hidden_states=False, labels=None, cu_seqlens=None, pos_ids=None, max_seqlen=None, **kwargs):
         if input_ids.dim() == 2 and input_ids.shape[0] == 1 and cu_seqlens is not None:
             input_ids = input_ids.squeeze(0)
             if labels is not None:
@@ -162,10 +160,10 @@ class RecurrenceModel(nn.Module):
         if self.gradient_checkpointing and self.training:
             x.requires_grad_(True)
             
-        # 1. Eliminate CPU syncs by providing a static max sequence bound for FA-2 block allocation
-        max_seqlen = self.config.max_context
-        
-        # 2. Compute RoPE Operations ONCE centrally to save immense VRAM and Tensor Core utilization
+        # Fallback safeguard in case max_seqlen wasn't successfully passed
+        if max_seqlen is None:
+            max_seqlen = self.config.max_context
+            
         cos, sin = None, None
         if pos_ids is not None:
             inv_freq = self.rope.inv_freq.to(x.device)

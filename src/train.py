@@ -30,7 +30,7 @@ class ArrowDatasetWrapper(Dataset):
     def __getitem__(self, idx):
         data = self.hf_dataset[idx]
         
-        cipher_ids = [int(x) for x in data["ciphertext"].split()]
+        cipher_ids = list(map(int, data["ciphertext"].split()))
         plain_text = data.get("plaintext", "")
         
         plain_ids = [self.char_to_id.get(char, self.unk_token) for char in plain_text] 
@@ -47,10 +47,6 @@ class ArrowDatasetWrapper(Dataset):
         }
 
 def varlen_collate(batch):
-    """
-    Concatenates batch into a single flat sequence to eliminate padding.
-    Cleaned dict output removes the max_seqlen integer logic causing CPU syncs.
-    """
     input_ids = []
     labels = []
     seqlens = []
@@ -70,11 +66,15 @@ def varlen_collate(batch):
     
     cu_seqlens = torch.tensor([0] + seqlens, dtype=torch.int32).cumsum(dim=0, dtype=torch.int32)
     
+    # Pass as a native Python int. HF Trainer will safely ignore it during `.to(device)` checks.
+    actual_max_seqlen = max(seqlens)
+    
     return {
         "input_ids": flat_input_ids,
         "labels": flat_labels,
         "pos_ids": flat_pos_ids,
-        "cu_seqlens": cu_seqlens.unsqueeze(0)
+        "cu_seqlens": cu_seqlens.unsqueeze(0),
+        "max_seqlen": actual_max_seqlen
     }
 
 def train():
