@@ -171,8 +171,9 @@ class RecurrenceModel(nn.Module):
             inv_freq = self.rope.inv_freq.to(x.device)
             freqs = torch.outer(pos_ids, inv_freq)
             emb = torch.cat((freqs, freqs), dim=-1).unsqueeze(1)
-            cos = emb.cos().to(x.dtype)
-            sin = emb.sin().to(x.dtype)
+            amp_dtype = torch.bfloat16 if self.config.bf16 else torch.float16
+            cos = emb.cos().to(amp_dtype)
+            sin = emb.sin().to(amp_dtype)
         
         layer_kwargs = {
             "cu_seqlens": cu_seqlens, 
