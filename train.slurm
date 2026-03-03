@@ -4,9 +4,9 @@
 #SBATCH --error=/ceph/project/SW10-CausalLM/LongFormer_NewArchitecture/logs/slurm_%x_%j.err
 #SBATCH --time=12:00:00
 #SBATCH --partition=l4
-#SBATCH --cpus-per-task=32   # Increased to feed data to 4 GPUs faster
-#SBATCH --mem=64G            # Increased memory to support 4 processes
-#SBATCH --gres=gpu:l4:4      # <--- Requesting 4 GPUs!
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=64G
+#SBATCH --gres=gpu:l4:4
 
 set -e
 
@@ -17,18 +17,21 @@ mkdir -p logs
 export HF_HUB_ENABLE_HF_TRANSFER=1
 
 echo "Job started on $(hostname) at $(date)" | tee logs/train_live_${SLURM_JOB_ID}.log
+
+# Force exactly the allocated GPUs to be visible to avoid NCCL deadlock oversubscription
+export CUDA_VISIBLE_DEVICES=$(echo $CUDA_VISIBLE_DEVICES | awk -F',' '{print $1","$2","$3","$4}')
+
 nvidia-smi | tee -a logs/train_live_${SLURM_JOB_ID}.log
 
 export PATH="$HOME/.local/bin:$PATH"
 export OMP_NUM_THREADS=8
 
-# First, ensure the environment is synced with the pyproject.toml (forces Torch 2.9 install)
 uv pip install -e .
-
-# Install flash-attention directly from the target wheel URL
 uv pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
 
-# Use torchrun to launch distributed training on 4 GPUs
-uv run torchrun --nproc_per_node=4 src/train.py 2>&1 | tee -a logs/train_live_${SLURM_JOB_ID}.log
+# Ensure master_port is randomized slightly to prevent port collision on shared nodes
+MASTER_PORT=$((10000 + $RANDOM % 20000))
+
+uv run torchrun --nproc_per_node=4 --master_port=$MASTER_PORT src/train.py 2>&1 | tee -a logs/train_live_${SLURM_JOB_ID}.log
 
 echo "Job finished at $(date)" | tee -a logs/train_live_${SLURM_JOB_ID}.log

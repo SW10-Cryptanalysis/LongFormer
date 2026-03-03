@@ -62,8 +62,10 @@ class FlashAttentionLayer(nn.Module):
         v = self.v_proj(hidden_states).view(total_tokens, self.num_heads, self.head_dim)
 
         if cos is not None and sin is not None:
-            q = apply_rope(q, cos, sin)
-            k = apply_rope(k, cos, sin)
+            # FlashAttention requires strictly contiguous tensors
+            q = apply_rope(q, cos, sin).contiguous()
+            k = apply_rope(k, cos, sin).contiguous()
+            v = v.contiguous()
 
         if FLASH_ATTN_AVAILABLE and cu_seqlens is not None:
             cu_seqlens = cu_seqlens.to(torch.int32)
@@ -145,7 +147,6 @@ class RecurrenceModel(nn.Module):
     def set_input_embeddings(self, value):
         self.embed = value
 
-    # Signature updated to catch dynamic max_seqlen from Trainer collator dict
     def forward(self, input_ids, output_hidden_states=False, labels=None, cu_seqlens=None, pos_ids=None, max_seqlen=None, **kwargs):
         if input_ids.dim() == 2 and input_ids.shape[0] == 1 and cu_seqlens is not None:
             input_ids = input_ids.squeeze(0)
@@ -160,7 +161,6 @@ class RecurrenceModel(nn.Module):
         if self.gradient_checkpointing and self.training:
             x.requires_grad_(True)
             
-        # Fallback safeguard in case max_seqlen wasn't successfully passed
         if max_seqlen is None:
             max_seqlen = self.config.max_context
             
@@ -199,13 +199,14 @@ class RecurrenceModel(nn.Module):
                 boundary_indices = cu_seqlens[1:-1] - 1
                 shift_labels[boundary_indices] = -100
 
+            # Compute standard uniform cross-entropy loss
             if LIGER_AVAILABLE and self.config.use_liger:
                 loss = self.output_head(self.embed.weight, shift_hidden, shift_labels)
             else:
                 logits_for_loss = self.output_head(shift_hidden)
                 loss_fct = nn.CrossEntropyLoss()
                 loss = loss_fct(logits_for_loss, shift_labels)
-        
+            
         if not self.training:
             if isinstance(self.output_head, LigerFusedLinearCrossEntropyLoss):
                 logits = torch.matmul(x, self.embed.weight.t())
