@@ -114,7 +114,6 @@ def train():
         gradient_accumulation_steps=cfg.grad_accum,
         learning_rate=cfg.learning_rate,
         weight_decay=0.01,
-        gradient_checkpointing=cfg.grad_checkpoint,
         bf16=cfg.bf16,
         logging_steps=cfg.log_steps,
         save_steps=cfg.save_steps,
@@ -125,6 +124,7 @@ def train():
         fsdp="full_shard auto_wrap", 
         fsdp_config={
             "transformer_layer_cls_to_wrap": ["CustomLayer"],
+            "activation_checkpointing": cfg.grad_checkpoint
         },
     )
 
