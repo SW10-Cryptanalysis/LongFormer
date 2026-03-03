@@ -7,10 +7,12 @@ TOTAL_SEQ = TEXT_LEN * 2
 DATA_DIR = Path(__file__).parent.parent.parent / "Ciphers"
 TRAINING_DIR = DATA_DIR / "Training_Arrow"
 TEST_DIR = DATA_DIR / "Test_Arrow"
+VAL_DIR = DATA_DIR / "Validation"
 
 OUTPUT_DIR = Path(__file__).parent.parent / "outputs"
 TOKENIZED_DATA_DIR = OUTPUT_DIR / "Training_Tokenized"
 TOKENIZED_TEST_DIR = OUTPUT_DIR / "Test_Tokenized"
+TOKENIZED_VAL_DIR = OUTPUT_DIR / "Validation_Tokenized"
 
 @dataclass
 class Config:
@@ -53,7 +55,9 @@ class Config:
     output_dir: Path = OUTPUT_DIR
     data_dir: Path = TRAINING_DIR
     test_dir: Path = TEST_DIR
+    val_dir: Path = VAL_DIR
     tokenized_data_dir: Path = TOKENIZED_DATA_DIR
     tokenized_test_dir: Path = TOKENIZED_TEST_DIR
+    tokenized_val_dir: Path = TOKENIZED_VAL_DIR
 
 cfg = Config()
