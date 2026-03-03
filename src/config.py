@@ -27,7 +27,7 @@ class Config:
     rope_theta: float = 10000.0
     use_liger: bool = True
     packing: bool = True
-    torch_compile: bool = True 
+    torch_compile: bool = False 
     bf16: bool = True
     hidden_act: str = "silu"
     
