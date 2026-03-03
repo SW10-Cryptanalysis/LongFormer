@@ -17,9 +17,12 @@ class ArrowDatasetWrapper(Dataset):
         if len(self.hf_dataset) == 0 and int(os.environ.get("LOCAL_RANK", 0)) == 0:
             print(f"Warning: Dataset at {directory_path} is empty.")
             
+        # Token Space Definitions
         self.max_homophone = cfg.unique_homophones 
         self.sep_token = self.max_homophone + 1
-        char_offset = self.sep_token + 1
+        self.unk_token = self.max_homophone + 2  # Added dedicated UNK token
+        
+        char_offset = self.unk_token + 1
         chars = "abcdefghijklmnopqrstuvwxyz "
         
         self.char_to_id = {char: i + char_offset for i, char in enumerate(chars)}
@@ -31,14 +34,22 @@ class ArrowDatasetWrapper(Dataset):
         data = self.hf_dataset[idx]
         
         cipher_ids = [int(x) for x in data["ciphertext"].split()]
-        
         plain_text = data.get("plaintext", "")
-        plain_ids = [self.char_to_id.get(char, 0) for char in plain_text] 
         
+        # Safe fallback to UNK token to prevent collision with cipher token 0
+        plain_ids = [self.char_to_id.get(char, self.unk_token) for char in plain_text] 
+        
+        # Symmetric Truncation to preserve parallel data
+        max_half = (cfg.max_context - 1) // 2
+        
+        if len(cipher_ids) > max_half:
+            print(f"Truncating cipher_ids from {len(cipher_ids)} to {max_half}")
+            cipher_ids = cipher_ids[:max_half]
+        if len(plain_ids) > max_half:
+            print(f"Truncating plain_ids from {len(plain_ids)} to {max_half}")
+            plain_ids = plain_ids[:max_half]
+            
         input_ids = cipher_ids + [self.sep_token] + plain_ids
-        
-        if len(input_ids) > cfg.max_context:
-            input_ids = input_ids[:cfg.max_context]
             
         return {
             "input_ids": torch.tensor(input_ids, dtype=torch.long),
