@@ -137,6 +137,19 @@ class RecurrenceModel(nn.Module):
             self.norm = nn.RMSNorm(config.dims)
             self.output_head = nn.Linear(config.dims, config.vocab_size, bias=False)
             
+        # Initialize weights to prevent gradient explosions (Han 2025 aligned)
+        self.apply(self._init_weights)
+            
+    def _init_weights(self, module):
+        """Standard Transformer weight initialization (N(0, 0.02))"""
+        std = 0.02
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=std)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=std)
+
     def gradient_checkpointing_enable(self, **kwargs):
         self.gradient_checkpointing = True
 
@@ -157,7 +170,7 @@ class RecurrenceModel(nn.Module):
             cu_seqlens = cu_seqlens.squeeze(0)
             if pos_ids is not None:
                 pos_ids = pos_ids.squeeze(0)
-            
+        
         x = self.embed(input_ids)
         
         if self.gradient_checkpointing and self.training:
@@ -194,21 +207,15 @@ class RecurrenceModel(nn.Module):
         logits = None
         
         if labels is not None:
-            # Autoregressive shift: predicts the n-th token from the (n-1)-th hidden state
             shift_hidden = x[:-1, :].contiguous()
             shift_labels = labels[1:].contiguous().clone()
             
-            # CRITICAL: Prevent the loss from penalizing the final token of one sequence 
-            # predicting the first token of the next sequence in a packed flat batch.
             if cu_seqlens is not None and len(cu_seqlens) > 2:
-                # cu_seqlens gives the start index of each sequence.
-                # Subtract 1 from the start indices of the 2nd through last sequences
-                # to target the exact position in the SHIFTED array.
                 boundary_indices = cu_seqlens[1:-1] - 1
                 shift_labels[boundary_indices] = -100
 
-            # Compute equal weighting cross-entropy loss over both C and P
             if LIGER_AVAILABLE and self.config.use_liger:
+                # Retained your correct Liger configuration signature: (lin_weight, _input, target)
                 loss = self.output_head(self.embed.weight, shift_hidden, shift_labels)
             else:
                 logits_for_loss = self.output_head(shift_hidden)
