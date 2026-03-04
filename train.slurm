@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=longformer
-#SBATCH --output=/ceph/project/SW10-CausalLM/LongFormer_NewArchitecture/logs/slurm_%x_%j.out
-#SBATCH --error=/ceph/project/SW10-CausalLM/LongFormer_NewArchitecture/logs/slurm_%x_%j.err
+#SBATCH --output=/ceph/project/SW10-CausalLM/LongFormer/logs/slurm_%x_%j.out
+#SBATCH --error=/ceph/project/SW10-CausalLM/LongFormer/logs/slurm_%x_%j.err
 #SBATCH --time=12:00:00
 #SBATCH --partition=l4
 #SBATCH --cpus-per-task=32
@@ -10,7 +10,7 @@
 
 set -e
 
-PROJECT_DIR=/ceph/project/SW10-CausalLM/LongFormer_NewArchitecture
+PROJECT_DIR=/ceph/project/SW10-CausalLM/LongFormer
 cd $PROJECT_DIR
 
 mkdir -p logs
