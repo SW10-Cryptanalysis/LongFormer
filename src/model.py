@@ -1,4 +1,5 @@
 import os
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -136,19 +137,45 @@ class RecurrenceModel(nn.Module):
         else:
             self.norm = nn.RMSNorm(config.dims)
             self.output_head = nn.Linear(config.dims, config.vocab_size, bias=False)
-            
-        # Initialize weights to prevent gradient explosions (Han 2025 aligned)
+
+        # 1. Apply base initialization recursively
         self.apply(self._init_weights)
-            
+        
+        # 2. Apply depth-dependent variance scaling to residual projections
+        self._apply_depth_scaling()
+
     def _init_weights(self, module):
-        """Standard Transformer weight initialization (N(0, 0.02))"""
+        """
+        Implements base variance-stabilized initialization derived from paper findings:
+        - Base standard deviation set to 0.02 (within the stable 10^-2 to 10^-1 band).
+        """
         std = 0.02
         if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=std)
+            nn.init.normal_(module.weight, mean=0.0, std=std)
             if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
+                nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=std)
+            nn.init.normal_(module.weight, mean=0.0, std=std)
+
+    def _apply_depth_scaling(self):
+        """
+        Applies depth-dependent variance equilibration specifically to the layers 
+        writing directly into the residual stream. This prevents variance explosion 
+        in deeper layers without relying entirely on RMSNorm.
+        """
+        std = 0.02
+        scaled_std = std / math.sqrt(2 * self.config.layers)
+        
+        for name, p in self.named_parameters():
+            # Attention output projection
+            if name.endswith("o_proj.weight"):
+                nn.init.normal_(p, mean=0.0, std=scaled_std)
+            
+            # MLP final projection: 
+            # 'mlp.2.weight' covers the standard nn.Sequential implementation
+            # 'down_proj.weight' covers LigerSwiGLUMLP and standard LLaMA implementations
+            elif name.endswith("mlp.2.weight") or name.endswith("down_proj.weight"):
+                nn.init.normal_(p, mean=0.0, std=scaled_std)
 
     def gradient_checkpointing_enable(self, **kwargs):
         self.gradient_checkpointing = True
@@ -215,7 +242,6 @@ class RecurrenceModel(nn.Module):
                 shift_labels[boundary_indices] = -100
 
             if LIGER_AVAILABLE and self.config.use_liger:
-                # Retained your correct Liger configuration signature: (lin_weight, _input, target)
                 loss = self.output_head(self.embed.weight, shift_hidden, shift_labels)
             else:
                 logits_for_loss = self.output_head(shift_hidden)
