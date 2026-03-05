@@ -13,7 +13,7 @@ def test_get_model_structure():
     assert isinstance(model, LongformerForCausalLM)
     assert model.config.vocab_size == cfg.vocab_size
     assert model.config.hidden_size == cfg.dims
-    assert model.config.max_position_embeddings == cfg.max_context
+    assert model.config.max_position_embeddings == cfg.max_context + 2
 
 def test_model_forward_pass_no_labels():
     model = get_model()

@@ -1,93 +1,155 @@
-import json
-import glob
 import os
 import torch
-from model import get_model
+from datasets import load_from_disk
 from transformers import Trainer, TrainingArguments
-from torch.utils.data import Dataset
 from config import cfg
+from model import get_model 
 
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
-class CipherPlainData(Dataset):
-    def __init__(self, directory_path):
-        self.file_paths = glob.glob(os.path.join(directory_path, "*.json"))
-        if not self.file_paths:
-            raise ValueError(f"No .json files found in {os.path.abspath(directory_path)}.")
+def varlen_collate(batch):
+    """
+    Packs variable-length sequences into a single flat 1D tensor to bypass padding tokens.
+    Calculates cu_seqlens required by flash_attn_varlen_func.
+    """
+    input_ids = []
+    labels = []
+    seqlens = []
+    pos_ids = []
+    
+    for item in batch:
+        seq_len = len(item["input_ids"])
+        input_ids.append(torch.tensor(item["input_ids"], dtype=torch.long))
+        labels.append(torch.tensor(item["labels"], dtype=torch.long))
+        seqlens.append(seq_len)
         
-        self.max_homophone = cfg.unique_homophones 
-        self.sep_token = self.max_homophone + 1
-        self.char_offset = self.sep_token + 1
+        # Absolute positional IDs for RoPE
+        pos_ids.append(torch.arange(seq_len, dtype=torch.long))
         
-        self.chars = "abcdefghijklmnopqrstuvwxyz " 
-        self.char_to_id = {char: i for i, char in enumerate(self.chars)}
+    # Flatten across the batch
+    flat_input_ids = torch.cat(input_ids).unsqueeze(0)
+    flat_labels = torch.cat(labels).unsqueeze(0)
+    flat_pos_ids = torch.cat(pos_ids).unsqueeze(0)
+    
+    # Cumulative sequence lengths (starts with 0)
+    cu_seqlens = torch.tensor([0] + seqlens, dtype=torch.int32).cumsum(dim=0, dtype=torch.int32)
+    actual_max_seqlen = max(seqlens)
+    
+    return {
+        "input_ids": flat_input_ids,
+        "labels": flat_labels,
+        "pos_ids": flat_pos_ids,
+        "cu_seqlens": cu_seqlens.unsqueeze(0),
+        "max_seqlen": actual_max_seqlen
+    }
 
-    def __len__(self):
-        return len(self.file_paths)
+def get_datasets():
+    # 1. Check if we already have the NEW tokenized data saved
+    if os.path.exists(cfg.tokenized_data_dir) and os.path.exists(cfg.tokenized_test_dir):
+        if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+            print("Found Varlen-ready tokenized datasets! Loading from disk...")
+        train_ds = load_from_disk(str(cfg.tokenized_data_dir))
+        test_ds = load_from_disk(str(cfg.tokenized_test_dir))
+        return train_ds, test_ds
 
-    def __getitem__(self, idx):
-        with open(self.file_paths[idx], 'r') as f:
-            data = json.load(f)
-
-        cipher_ids = [int(x) for x in data["ciphertext"].split()]
-        plain_ids = [self.char_to_id.get(c, 0) + self.char_offset for c in data["plaintext"]]
-
-        # 1. Safely truncate plain_ids first if it's absurdly long
-        max_plain_len = cfg.max_context - 2
-        if len(plain_ids) > max_plain_len:
-            plain_ids = plain_ids[:max_plain_len]
-
-        # 2. Now max_cipher_len is guaranteed to be >= 1
-        max_cipher_len = cfg.max_context - len(plain_ids) - 1 
-        if len(cipher_ids) > max_cipher_len:
-            cipher_ids = cipher_ids[:max_cipher_len]
-
-        full_seq = cipher_ids + [self.sep_token] + plain_ids
+    # 2. If not, load the raw Arrow datasets and tokenize
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        print("Tokenized datasets not found. Loading raw Arrow datasets...")
         
-        # 3. Final safety net
-        full_seq = full_seq[:cfg.max_context]
-        
-        labels = full_seq.copy()
-        padding_length = cfg.max_context - len(full_seq)
+    train_ds = load_from_disk(str(cfg.data_dir))
+    test_ds = load_from_disk(str(cfg.test_dir))
 
-        input_ids = full_seq + [0] * padding_length
-        labels = labels + [-100] * padding_length
-        attention_mask = [1] * len(full_seq) + [0] * padding_length
-        
-        assert max(input_ids) < cfg.vocab_size, f"Found token ID {max(input_ids)} but vocab size is {cfg.vocab_size}"
+    max_homophone = cfg.unique_homophones 
+    sep_token = max_homophone + 1
+    unk_token = max_homophone + 2
+    char_offset = unk_token + 1
+    chars = "abcdefghijklmnopqrstuvwxyz "
+    char_to_id = {char: i + char_offset for i, char in enumerate(chars)}
 
-        return {
-            "input_ids": torch.tensor(input_ids, dtype=torch.long),
-            "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
-            "labels": torch.tensor(labels, dtype=torch.long),
-        }
+    def prepare_dataset(example):
+        cipher_ids = [int(x) for x in example["ciphertext"].split()]
+        plain_text = example.get("plaintext", "")
+        plain_ids = [char_to_id.get(char, unk_token) for char in plain_text] 
+        
+        # [C1, C2...][SEP][P1, P2...] format
+        input_ids = cipher_ids + [sep_token] + plain_ids
+        if len(input_ids) > cfg.max_context:
+            input_ids = input_ids[:cfg.max_context]
+            
+        return {"input_ids": input_ids, "labels": input_ids}
+
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        print("Tokenizing datasets with UNK offset (this will only happen once!)...")
+        
+    train_ds = train_ds.map(
+        prepare_dataset, 
+        num_proc=8, # Reduced slightly for 64GB RAM safety
+        remove_columns=train_ds.column_names
+    )
+    test_ds = test_ds.map(
+        prepare_dataset, 
+        num_proc=8, 
+        remove_columns=test_ds.column_names
+    )
+
+    # 3. Save to disk so subsequent runs load instantly
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        print(f"Saving tokenized training data to {cfg.tokenized_data_dir}...")
+        train_ds.save_to_disk(str(cfg.tokenized_data_dir))
+        print(f"Saving tokenized test data to {cfg.tokenized_test_dir}...")
+        test_ds.save_to_disk(str(cfg.tokenized_test_dir))
+
+    return train_ds, test_ds
 
 def train():
     model = get_model()
+    
+    # Retrieve datasets (either loads cached or tokenizes and saves)
+    train_ds, test_ds = get_datasets()
 
-    args = TrainingArguments(
-        output_dir=cfg.output_dir,
+    train_args = TrainingArguments(
+        output_dir=str(cfg.output_dir),
         num_train_epochs=cfg.epochs,
         per_device_train_batch_size=cfg.batch_size,
         gradient_accumulation_steps=cfg.grad_accum,
         learning_rate=cfg.learning_rate,
-        gradient_checkpointing=cfg.grad_checkpoint,
+        weight_decay=0.01,
+        bf16=cfg.bf16,
         logging_steps=cfg.log_steps,
         save_steps=cfg.save_steps,
-        bf16=True,
+        eval_steps=cfg.eval_steps,
+        torch_compile=cfg.torch_compile,
+        dataloader_num_workers=8, 
+        dataloader_pin_memory=True,
+        fsdp="full_shard auto_wrap", 
+        fsdp_config={
+            "transformer_layer_cls_to_wrap": ["CustomLayer"],
+            "activation_checkpointing": cfg.grad_checkpoint
+        },
     )
 
     trainer = Trainer(
         model=model,
-        args=args,
-        train_dataset=CipherPlainData(directory_path=cfg.data_dir),
+        args=train_args,
+        train_dataset=train_ds,
+        eval_dataset=test_ds,
+        data_collator=varlen_collate
     )
 
-    print(f"Training on {torch.cuda.get_device_name(0)}...")
+    # Check if there is a checkpoint to resume from
+    last_checkpoint = None
+    if os.path.isdir(cfg.output_dir):
+        checkpoints = [d for d in os.listdir(cfg.output_dir) if d.startswith("checkpoint-")]
+        if checkpoints:
+            checkpoints.sort(key=lambda x: int(x.split('-')[1]))
+            last_checkpoint = os.path.join(cfg.output_dir, checkpoints[-1])
+            if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+                print(f"Resuming from checkpoint: {last_checkpoint}")
 
-    trainer.train()
-
-    trainer.save_model(f"{cfg.output_dir}/model")
+    trainer.train(resume_from_checkpoint=last_checkpoint)
+    
+    if trainer.is_world_process_zero():
+        trainer.save_model(os.path.join(str(cfg.output_dir), "final_model"))
 
 if __name__ == "__main__":
     train()
