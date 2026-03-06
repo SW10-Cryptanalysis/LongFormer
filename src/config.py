@@ -1,32 +1,33 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-TEXT_LEN = 10_000
+# Context sizing for Ciphers based on provided metadata
+TEXT_LEN = 10000 
 TOTAL_SEQ = TEXT_LEN * 2
+BUFFER = 10
 
 DATA_DIR = Path(__file__).parent.parent.parent / "Ciphers"
-TRAINING_DIR = DATA_DIR / "Training_Arrow"
-TEST_DIR = DATA_DIR / "Test_Arrow"
-VAL_DIR = DATA_DIR / "Validation"
-
 OUTPUT_DIR = Path(__file__).parent.parent / "outputs"
-TOKENIZED_DATA_DIR = OUTPUT_DIR / "Training_Tokenized"
-TOKENIZED_TEST_DIR = OUTPUT_DIR / "Test_Tokenized"
-TOKENIZED_VAL_DIR = OUTPUT_DIR / "Validation_Tokenized"
+
+# Expecting pre-tokenized Arrow directories from preprocess.py
+TOKENIZED_TRAINING_DIR = DATA_DIR / "tokenized_normal" / "Training"
+TOKENIZED_TEST_DIR = DATA_DIR / "tokenized_normal" / "Test"
+TOKENIZED_VAL_DIR = DATA_DIR / "tokenized_normal" / "Validation"
 
 @dataclass
 class Config:
     # ARCHITECTURE
-    unique_homophones: int = 2500
-    max_context: int = TOTAL_SEQ  
-    vocab_size: int = 2560 
+    unique_homophones: int = 2067 
+    unique_letters: int = 26
+    vocab_size: int = 2176  # 2067 + 26 + buffer, padded to multiple of 64
+    max_context: int = TOTAL_SEQ + BUFFER  
     dims: int = 512
     layers: int = 16
     att_heads: int = 8 
     
     # Custom Arch
     window_size: int = 512
-    rope_theta: float = 10000.0
+    rope_theta: float = 1000000.0 # Increased for ~20k sequence lengths
     use_liger: bool = True
     packing: bool = True
     torch_compile: bool = False 
@@ -53,10 +54,7 @@ class Config:
 
     # SYSTEM
     output_dir: Path = OUTPUT_DIR
-    data_dir: Path = TRAINING_DIR
-    test_dir: Path = TEST_DIR
-    val_dir: Path = VAL_DIR
-    tokenized_data_dir: Path = TOKENIZED_DATA_DIR
+    tokenized_training_dir: Path = TOKENIZED_TRAINING_DIR
     tokenized_test_dir: Path = TOKENIZED_TEST_DIR
     tokenized_val_dir: Path = TOKENIZED_VAL_DIR
 

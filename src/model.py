@@ -138,17 +138,10 @@ class RecurrenceModel(nn.Module):
             self.norm = nn.RMSNorm(config.dims)
             self.output_head = nn.Linear(config.dims, config.vocab_size, bias=False)
 
-        # 1. Apply base initialization recursively
         self.apply(self._init_weights)
-        
-        # 2. Apply depth-dependent variance scaling to residual projections
         self._apply_depth_scaling()
 
     def _init_weights(self, module):
-        """
-        Implements base variance-stabilized initialization derived from paper findings:
-        - Base standard deviation set to 0.02 (within the stable 10^-2 to 10^-1 band).
-        """
         std = 0.02
         if isinstance(module, nn.Linear):
             nn.init.normal_(module.weight, mean=0.0, std=std)
@@ -158,22 +151,12 @@ class RecurrenceModel(nn.Module):
             nn.init.normal_(module.weight, mean=0.0, std=std)
 
     def _apply_depth_scaling(self):
-        """
-        Applies depth-dependent variance equilibration specifically to the layers 
-        writing directly into the residual stream. This prevents variance explosion 
-        in deeper layers without relying entirely on RMSNorm.
-        """
         std = 0.02
         scaled_std = std / math.sqrt(2 * self.config.layers)
         
         for name, p in self.named_parameters():
-            # Attention output projection
             if name.endswith("o_proj.weight"):
                 nn.init.normal_(p, mean=0.0, std=scaled_std)
-            
-            # MLP final projection: 
-            # 'mlp.2.weight' covers the standard nn.Sequential implementation
-            # 'down_proj.weight' covers LigerSwiGLUMLP and standard LLaMA implementations
             elif name.endswith("mlp.2.weight") or name.endswith("down_proj.weight"):
                 nn.init.normal_(p, mean=0.0, std=scaled_std)
 
