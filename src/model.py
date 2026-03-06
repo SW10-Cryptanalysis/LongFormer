@@ -1,5 +1,6 @@
 import os
 import math
+from typing import cast
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,7 +8,7 @@ import torch.utils.checkpoint as checkpoint
 from config import cfg
 
 try:
-    from flash_attn import flash_attn_varlen_func
+    from flash_attn import flash_attn_varlen_func # type: ignore
     FLASH_ATTN_AVAILABLE = True
     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
         print("FlashAttention-2 Varlen loaded successfully.")
@@ -17,7 +18,7 @@ except ImportError:
         print("FlashAttention-2 not found. Will fallback to PyTorch Native SDPA.")
 
 try:
-    from liger_kernel.transformers import (
+    from liger_kernel.transformers import ( # type: ignore
         LigerFusedLinearCrossEntropyLoss,
         LigerRMSNorm,
         LigerSwiGLUMLP
@@ -191,7 +192,7 @@ class RecurrenceModel(nn.Module):
             
         cos, sin = None, None
         if pos_ids is not None:
-            inv_freq = self.rope.inv_freq.to(x.device)
+            inv_freq = cast(torch.Tensor, self.rope.inv_freq).to(x.device) 
             freqs = torch.outer(pos_ids, inv_freq)
             emb = torch.cat((freqs, freqs), dim=-1).unsqueeze(1)
             amp_dtype = torch.bfloat16 if self.config.bf16 else torch.float16
