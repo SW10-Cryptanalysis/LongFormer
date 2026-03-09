@@ -48,22 +48,21 @@ def evaluate():
     model.eval()
 
     # 2. Setup SOTA tokenization mapping
-    max_homophone = cfg.unique_homophones 
-    sep_token = max_homophone + 1
-    unk_token = max_homophone + 2
-    char_offset = unk_token + 1
+    bos_token = cfg.bos_token_id
+    sep_token = cfg.sep_token_id
+    eos_token = cfg.eos_token_id
+    char_offset = cfg.char_offset
     chars = "abcdefghijklmnopqrstuvwxyz "
     id_to_char = {i + char_offset: char for i, char in enumerate(chars)}
 
     # 3. Load Test Data from Arrow
-    print(f"Loading test dataset from {cfg.val_dir}...")
+    print(f"Loading test dataset from {cfg.tokenized_val_dir}...")
     try:
-        val_ds = load_from_disk(str(cfg.val_dir))
+        val_ds = load_from_disk(str(cfg.tokenized_val_dir))
     except Exception as e:
         print(f"Could not load dataset: {e}")
         return
 
-    # Select first 10 files for quick evaluation
     num_tests = min(10, len(val_ds))
     eval_subset = val_ds.select(range(num_tests))
     
@@ -79,13 +78,14 @@ def evaluate():
         if len(cipher_ids) > max_cipher_len:
             cipher_ids = cipher_ids[:max_cipher_len]
 
-        input_ids = cipher_ids + [sep_token]
+        # MODIFIED: Explicitly inject BOS to match the Recurrence-Encoded format
+        input_ids = [bos_token] + cipher_ids + [sep_token]
         
         print(f"File {i+1}/{num_tests}")
         print(f"Cipher length: {len(cipher_ids)} tokens")
         print(f"True Plaintext (first 100 chars): {true_plain[:100]}...")
         
-        # 4. Generate plaintext (Manual greedy decoding with Varlen Support)
+        # 4. Generate plaintext
         generated_ids = []
         chars_to_generate = min(len(true_plain), 100) 
         curr_input_ids = input_ids[:] 
@@ -95,7 +95,6 @@ def evaluate():
             for _ in range(chars_to_generate):
                 seq_len = len(curr_input_ids)
                 
-                # Construct required tensors for Custom FlashAttention-2 Varlen
                 input_tensor = torch.tensor([curr_input_ids], dtype=torch.long, device=device)
                 pos_ids = torch.arange(seq_len, dtype=torch.long, device=device).unsqueeze(0)
                 cu_seqlens = torch.tensor([0, seq_len], dtype=torch.int32, device=device)
@@ -113,14 +112,16 @@ def evaluate():
                 generated_ids.append(next_token)
                 curr_input_ids.append(next_token)
                 
-                # Break if it predicts a non-character token
-                if next_token < char_offset:
+                # MODIFIED: Explicitly halt on EOS to prevent context bleeding
+                if next_token == eos_token or next_token < char_offset:
                     break
         
         # 5. Decode and Calculate SER
         pred_plain = "".join([id_to_char.get(idx, "?") for idx in generated_ids])
-        true_plain_subset = true_plain[:len(pred_plain)]
+        # Clean up any potential EOS token mapping in the string representation
+        pred_plain = pred_plain.replace("?", "")
         
+        true_plain_subset = true_plain[:len(pred_plain)]
         ser = Levenshtein.distance(true_plain_subset, pred_plain) / max(len(true_plain_subset), 1)
         
         print("\r" + " " * 20 + "\r", end="") 

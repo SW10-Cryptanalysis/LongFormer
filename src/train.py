@@ -29,7 +29,14 @@ class PretokenizedCipherDataset(Dataset):
         input_ids = item["input_ids"][:cfg.max_context]
         labels = item["labels"][:cfg.max_context]
 
-        # Return as unpadded Python lists; varlen_collate will handle tensor mapping
+        # MODIFIED: Ensure PAD tokens are explicitly stripped before Varlen Packing
+        # This prevents the Tensor Cores from wasting FLOPs on padding logic
+        valid_lengths = [i for i, token in enumerate(input_ids) if token != cfg.pad_token_id]
+        if valid_lengths:
+            actual_len = valid_lengths[-1] + 1
+            input_ids = input_ids[:actual_len]
+            labels = labels[:actual_len]
+
         return {
             "input_ids": input_ids,
             "labels": labels
@@ -90,7 +97,7 @@ def train():
         logging_steps=cfg.log_steps,
         save_steps=cfg.save_steps,
         eval_steps=cfg.eval_steps,
-        torch_compile=cfg.torch_compile,
+        save_total_limit=cfg.save_total_limit,
         dataloader_num_workers=8, 
         dataloader_pin_memory=True,
         fsdp="full_shard auto_wrap", 

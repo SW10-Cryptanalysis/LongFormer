@@ -2,9 +2,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # Context sizing for Ciphers based on provided metadata
-TEXT_LEN = 10000 
+TEXT_LEN = 9961 
 TOTAL_SEQ = TEXT_LEN * 2
-BUFFER = 10
+BUFFER = 78
 
 DATA_DIR = Path(__file__).parent.parent.parent / "Ciphers"
 OUTPUT_DIR = Path(__file__).parent.parent / "outputs"
@@ -17,20 +17,19 @@ TOKENIZED_VAL_DIR = DATA_DIR / "tokenized_normal" / "Validation"
 @dataclass
 class Config:
     # ARCHITECTURE
-    unique_homophones: int = 2067 
+    unique_homophones: int = 2494 
     unique_letters: int = 26
-    vocab_size: int = 2176  # 2067 + 26 + buffer, padded to multiple of 64
+    vocab_size: int = 2560  # Padded to multiple of 64
     max_context: int = TOTAL_SEQ + BUFFER  
+    
+    # Custom Arch
     dims: int = 512
     layers: int = 16
     att_heads: int = 8 
-    
-    # Custom Arch
     window_size: int = 512
-    rope_theta: float = 1000000.0 # Increased for ~20k sequence lengths
+    rope_theta: float = 1_000_000.0 
     use_liger: bool = True
     packing: bool = True
-    torch_compile: bool = False 
     bf16: bool = True
     hidden_act: str = "silu"
     
@@ -48,9 +47,18 @@ class Config:
     learning_rate: float = 2e-4
     epochs: int = 3
     grad_checkpoint: bool = True
-    log_steps: int = 50
+    log_steps: int = 10
     save_steps: int = 500
     eval_steps: int = 1000
+    save_total_limit: int = 2
+    
+    # Token IDs
+    pad_token_id: int = 0
+    sep_token_id: int = 2495
+    space_token_id: int = 2496
+    bos_token_id: int = 2497
+    eos_token_id: int = 2498
+    char_offset: int = 2499
 
     # SYSTEM
     output_dir: Path = OUTPUT_DIR
