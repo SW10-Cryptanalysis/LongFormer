@@ -35,7 +35,6 @@ class PretokenizedCipherDataset(Dataset):
         input_ids = item["input_ids"][: cfg.max_context]
         labels = item["labels"][: cfg.max_context]
 
-        # MODIFIED: Ensure PAD tokens are explicitly stripped before Varlen Packing
         # This prevents the Tensor Cores from wasting FLOPs on padding logic
         valid_lengths = [
             i for i, token in enumerate(input_ids) if token != cfg.pad_token_id
@@ -95,7 +94,6 @@ def varlen_collate(batch: list[dict[str, list[int]]]) -> dict[str, torch.Tensor 
 def train() -> None:
     model = get_model()
 
-    # Directly load the pre-tokenized offline datasets
     train_ds = PretokenizedCipherDataset(cfg.tokenized_training_dir)
     test_ds = PretokenizedCipherDataset(cfg.tokenized_test_dir)
 
@@ -128,7 +126,6 @@ def train() -> None:
         data_collator=varlen_collate,
     )
 
-    # Check if there is a checkpoint to resume from
     last_checkpoint = None
     if os.path.isdir(cfg.output_dir):
         checkpoints = [
