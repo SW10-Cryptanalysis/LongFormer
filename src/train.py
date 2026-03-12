@@ -4,8 +4,8 @@ import torch
 from datasets import load_from_disk
 from torch.utils.data import Dataset
 from transformers import Trainer, TrainingArguments
-from config import cfg
-from model import get_model
+from src.config import cfg
+from src.model import get_model
 
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
@@ -78,7 +78,8 @@ def varlen_collate(batch: list[dict[str, list[int]]]) -> dict[str, torch.Tensor 
 
     # Cumulative sequence lengths (starts with 0) for attention boundaries
     cu_seqlens = torch.tensor([0] + seqlens, dtype=torch.int32).cumsum(
-        dim=0, dtype=torch.int32,
+        dim=0,
+        dtype=torch.int32,
     )
     actual_max_seqlen = max(seqlens)
 

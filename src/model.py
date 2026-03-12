@@ -4,7 +4,7 @@ from typing import cast
 import torch
 import torch.nn as nn
 import torch.utils.checkpoint as checkpoint
-from config import cfg, Config
+from src.config import cfg, Config
 
 try:
     from flash_attn import flash_attn_varlen_func  # type: ignore
@@ -253,7 +253,10 @@ class RecurrenceModel(nn.Module):
                 x = cast(
                     torch.Tensor,
                     checkpoint.checkpoint(
-                        layer, x, use_reentrant=False, **layer_kwargs,
+                        layer,
+                        x,
+                        use_reentrant=False,
+                        **layer_kwargs,
                     ),
                 )
             else:

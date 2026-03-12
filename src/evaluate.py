@@ -4,9 +4,9 @@ import torch
 import Levenshtein
 import logging
 from datasets import load_from_disk
-from model import get_model, RecurrenceModel
+from src.model import get_model, RecurrenceModel
 from easy_logging import EasyFormatter
-from config import cfg
+from src.config import cfg
 
 handler = logging.StreamHandler()
 handler.setFormatter(EasyFormatter())
