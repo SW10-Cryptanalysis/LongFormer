@@ -2,9 +2,17 @@ import os
 from pathlib import Path
 import torch
 import Levenshtein
+import logging
 from datasets import load_from_disk
 from model import get_model, RecurrenceModel
+from easy_logging import EasyFormatter
 from config import cfg
+
+handler = logging.StreamHandler()
+handler.setFormatter(EasyFormatter())
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.addHandler(handler)
 
 
 def _resolve_model_path() -> Path | None:
@@ -63,7 +71,9 @@ def _generate_tokens(
         for _ in range(chars_to_generate):
             seq_len = len(curr_input_ids)
             input_tensor = torch.tensor(
-                [curr_input_ids], dtype=torch.long, device=device,
+                [curr_input_ids],
+                dtype=torch.long,
+                device=device,
             )
             pos_ids = torch.arange(seq_len, dtype=torch.long, device=device).unsqueeze(
                 0,
@@ -124,7 +134,7 @@ def evaluate() -> None:
         generated_ids = _generate_tokens(
             model,
             input_ids,
-            min(len(true_plain), 100),
+            min(len(true_plain), 100),  # Limit generation to 100 chars
             eos_token,
             char_offset,
             device,
@@ -134,8 +144,12 @@ def evaluate() -> None:
             [id_to_char.get(idx, "?") for idx in generated_ids],
         ).replace("?", "")
         true_plain_subset = true_plain[: len(pred_plain)]
-        Levenshtein.distance(true_plain_subset, pred_plain) / max(
-            len(true_plain_subset), 1,
+        lev_distance = Levenshtein.distance(true_plain_subset, pred_plain) / max(
+            len(true_plain_subset),
+            1,
+        )
+        logger.info(
+            f"Sample {_i}: SER={lev_distance:.2f} | True: {true_plain_subset} | Pred: {pred_plain}",
         )
 
 
