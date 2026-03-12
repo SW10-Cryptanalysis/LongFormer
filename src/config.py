@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # Context sizing for Ciphers based on provided metadata
-TEXT_LEN = 9961 
+TEXT_LEN = 9961
 TOTAL_SEQ = TEXT_LEN * 2
 BUFFER = 78
 
@@ -14,36 +14,41 @@ TOKENIZED_TRAINING_DIR = DATA_DIR / "tokenized_normal" / "Training"
 TOKENIZED_TEST_DIR = DATA_DIR / "tokenized_normal" / "Test"
 TOKENIZED_VAL_DIR = DATA_DIR / "tokenized_normal" / "Validation"
 
+
 @dataclass
 class Config:
+    """Configuration dataclass for model architecture, training, and system paths."""
+
     # ARCHITECTURE
-    unique_homophones: int = 2494 
+    unique_homophones: int = 2494
     unique_letters: int = 26
     vocab_size: int = 2560  # Padded to multiple of 64
-    max_context: int = TOTAL_SEQ + BUFFER  
-    
+    max_context: int = TOTAL_SEQ + BUFFER
+
     # Custom Arch
     dims: int = 512
     layers: int = 16
-    att_heads: int = 8 
+    att_heads: int = 8
     window_size: int = 512
-    rope_theta: float = 1_000_000.0 
+    rope_theta: float = 1_000_000.0
     use_liger: bool = True
     packing: bool = True
     bf16: bool = True
     hidden_act: str = "silu"
-    
+
     @property
-    def hidden_size(self):
+    def hidden_size(self) -> int:
+        """Return the hidden size, equal to dims."""
         return self.dims
-        
+
     @property
-    def intermediate_size(self):
+    def intermediate_size(self) -> int:
+        """Return the intermediate MLP size, equal to dims * 4."""
         return self.dims * 4
 
     # TRAINING
-    batch_size: int = 2 
-    grad_accum: int = 16 
+    batch_size: int = 2
+    grad_accum: int = 16
     learning_rate: float = 2e-4
     epochs: int = 3
     grad_checkpoint: bool = True
@@ -51,7 +56,7 @@ class Config:
     save_steps: int = 500
     eval_steps: int = 1000
     save_total_limit: int = 2
-    
+
     # Token IDs
     pad_token_id: int = 0
     sep_token_id: int = 2495
@@ -65,5 +70,6 @@ class Config:
     tokenized_training_dir: Path = TOKENIZED_TRAINING_DIR
     tokenized_test_dir: Path = TOKENIZED_TEST_DIR
     tokenized_val_dir: Path = TOKENIZED_VAL_DIR
+
 
 cfg = Config()
