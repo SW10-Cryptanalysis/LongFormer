@@ -13,7 +13,6 @@ set -e
 # Update to your actual Mistral project directory
 PROJECT_DIR=/ceph/project/SW10-CausalLM/LongFormer
 cd $PROJECT_DIR
-export PYTHONPATH=$PROJECT_DIR
 
 # ==============================================================================
 # DYNAMIC AUTO-CHAINING LOGIC
@@ -25,9 +24,7 @@ if [ -d "outputs/final_model" ]; then
     exit 0
 fi
 
-# 2. Submit the NEXT job to the queue, dependent on THIS job finishing or timing out.
-# $SLURM_JOB_ID is the current job. $0 refers to this exact script file.
-echo "Dynamically queuing the next 12-hour continuation job with args "$@""
+echo "Dynamically queuing the next 12-hour continuation job with arguments: $@"
 sbatch --dependency=afterany:$SLURM_JOB_ID $0 "$@"
 # ==============================================================================
 
@@ -59,9 +56,10 @@ MASTER_PORT=$((10000 + $RANDOM % 20000))
 
 # Launch with torchrun. Hugging Face Trainer automatically detects the distributed 
 # environment spawned by torchrun and applies the FSDP arguments defined in train.py
+# "$@" ensures any flags like --without-spaces are injected directly into the Python call.
 uv run torchrun \
     --nproc_per_node=4 \
     --master_port=$MASTER_PORT \
-    src/train.py "$@" 2>&1 | tee -a logs/train_live_${SLURM_JOB_ID}.log
+    -m src.train "$@" 2>&1 | tee -a logs/train_live_${SLURM_JOB_ID}.log
 
 echo "Job finished at $(date)" | tee -a logs/train_live_${SLURM_JOB_ID}.log
