@@ -43,7 +43,7 @@ line-length = 88
 exclude = ["venv", ".venv", "__pycache__", "build", "dist", ".eggs", "*.egg", ".mypy_cache", ".pytest_cache"]
 select = ["E", "F", "W", "C90", "B", "B9", "ANN", "COM", "D", "ERA", "ISC", "N", "Q000", "S", "SIM", "TID251", "UP", "YTT", "T"]
 ignore = [
-    "W191", "ERA001", "S311", "D206", "D100", "D203", "D213", "UP035", "ANN401", "E501", "D401", "D103"
+    "ERA001", "S311", "D206", "D100", "D203", "D213", "UP035", "ANN401", "E501", "D401", "D103"
 ]
 
 [tool.ruff.lint.per-file-ignores]
