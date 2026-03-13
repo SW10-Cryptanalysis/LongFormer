@@ -1,5 +1,5 @@
 [project]
-name = "longformer"
+name = "custom-causal-lm"
 version = "0.1.0"
 description = "Custom causal model for long cipher decoding tasks"
 readme = "README.md"
