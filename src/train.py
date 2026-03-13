@@ -147,11 +147,13 @@ def train() -> None:
     model = get_model()
 
     if cfg.use_spaces:
-        logger.info("Using space tokens in training.")
+        if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+            logger.info("Using space tokens in training.")
         train_ds = PretokenizedCipherDataset(cfg.tokenized_spaced_train_dir)
         val_ds = PretokenizedCipherDataset(cfg.tokenized_spaced_val_dir)
     else:
-        logger.info("Not using space tokens in training.")
+        if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+            logger.info("Not using space tokens in training.")
         train_ds = PretokenizedCipherDataset(cfg.tokenized_training_dir)
         val_ds = PretokenizedCipherDataset(cfg.tokenized_val_dir)
 
