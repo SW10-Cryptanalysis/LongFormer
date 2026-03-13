@@ -112,7 +112,10 @@ def evaluate() -> None:
     id_to_char = {i + char_offset: char for i, char in enumerate(chars)}
 
     try:
-        val_ds = load_from_disk(str(cfg.tokenized_val_dir))
+        val_dir = (
+            cfg.tokenized_spaced_val_dir if cfg.use_spaces else cfg.tokenized_val_dir
+        )
+        val_ds = load_from_disk(str(val_dir))
     except Exception:
         return
 

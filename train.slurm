@@ -26,8 +26,8 @@ fi
 
 # 2. Submit the NEXT job to the queue, dependent on THIS job finishing or timing out.
 # $SLURM_JOB_ID is the current job. $0 refers to this exact script file.
-echo "Dynamically queuing the next 12-hour continuation job..."
-sbatch --dependency=afterany:$SLURM_JOB_ID $0
+echo "Dynamically queuing the next 12-hour continuation job with args "$@""
+sbatch --dependency=afterany:$SLURM_JOB_ID $0 "$@"
 # ==============================================================================
 
 mkdir -p logs
@@ -61,6 +61,6 @@ MASTER_PORT=$((10000 + $RANDOM % 20000))
 uv run torchrun \
     --nproc_per_node=4 \
     --master_port=$MASTER_PORT \
-    src/train.py 2>&1 | tee -a logs/train_live_${SLURM_JOB_ID}.log
+    src/train.py "$@" 2>&1 | tee -a logs/train_live_${SLURM_JOB_ID}.log
 
 echo "Job finished at $(date)" | tee -a logs/train_live_${SLURM_JOB_ID}.log

@@ -1,13 +1,21 @@
 import os
-from pathlib import Path
 import torch
+import logging
+from pathlib import Path
 from datasets import load_from_disk
 from torch.utils.data import Dataset
 from transformers import Trainer, TrainingArguments
 from src.config import cfg
 from src.model import get_model
+from easy_logging import EasyFormatter
 
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+
+handler = logging.StreamHandler()
+handler.setFormatter(EasyFormatter())
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.addHandler(handler)
 
 
 class PretokenizedCipherDataset(Dataset):
@@ -30,6 +38,14 @@ class PretokenizedCipherDataset(Dataset):
     def __getitem__(self, idx: int) -> dict[str, list[int]]:
         """Return a single sample with input_ids and labels, truncated and stripped of padding."""
         item = self.hf_dataset[idx]
+
+        if (
+            len(item["input_ids"]) > cfg.max_context
+            or len(item["labels"]) > cfg.max_context
+        ):
+            logger.info(
+                f"Sample {idx} truncated: input_ids {len(item['input_ids'])} -> {cfg.max_context}, labels {len(item['labels'])} -> {cfg.max_context}",
+            )
 
         # Enforce Equal Loss Weighting and truncate if necessary
         input_ids = item["input_ids"][: cfg.max_context]
@@ -94,8 +110,14 @@ def varlen_collate(batch: list[dict[str, list[int]]]) -> dict[str, torch.Tensor 
 def train() -> None:
     model = get_model()
 
-    train_ds = PretokenizedCipherDataset(cfg.tokenized_training_dir)
-    test_ds = PretokenizedCipherDataset(cfg.tokenized_test_dir)
+    if cfg.use_spaces:
+        logger.info("Using space tokens in training.")
+        train_ds = PretokenizedCipherDataset(cfg.tokenized_spaced_train_dir)
+        val_ds = PretokenizedCipherDataset(cfg.tokenized_spaced_val_dir)
+    else:
+        logger.info("Not using space tokens in training.")
+        train_ds = PretokenizedCipherDataset(cfg.tokenized_training_dir)
+        val_ds = PretokenizedCipherDataset(cfg.tokenized_val_dir)
 
     train_args = TrainingArguments(
         output_dir=str(cfg.output_dir),
@@ -122,7 +144,7 @@ def train() -> None:
         model=model,
         args=train_args,
         train_dataset=train_ds,
-        eval_dataset=test_ds,
+        eval_dataset=val_ds,
         data_collator=varlen_collate,
     )
 
@@ -139,8 +161,14 @@ def train() -> None:
 
     trainer.train(resume_from_checkpoint=last_checkpoint)
 
+    final_model_name = "final_model"
+    if cfg.use_spaces:
+        final_model_name += "_with_spaces"
+    else:
+        final_model_name += "_no_spaces"
+
     if trainer.is_world_process_zero():
-        trainer.save_model(os.path.join(str(cfg.output_dir), "final_model"))
+        trainer.save_model(os.path.join(str(cfg.output_dir), final_model_name))
 
 
 if __name__ == "__main__":

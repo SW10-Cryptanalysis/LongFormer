@@ -55,8 +55,8 @@ def test_varlen_collate():
     assert collated["max_seqlen"] == 3
 
 
-def test_train_execution(mocker):
-    # Mocking external dependencies to test the training orchestration
+def test_train_execution_with_spaces(mocker):
+    mocker.patch("src.train.cfg.use_spaces", True)
     mocker.patch("src.train.PretokenizedCipherDataset")
     mock_get_model = mocker.patch("src.train.get_model")
     mock_trainer = mocker.patch("src.train.Trainer")
@@ -74,3 +74,30 @@ def test_train_execution(mocker):
     mock_trainer.assert_called_once()
     mock_trainer_instance.train.assert_called_once_with(resume_from_checkpoint=None)
     mock_trainer_instance.save_model.assert_called_once()
+    args, _ = mock_trainer_instance.save_model.call_args
+    save_path = str(args[0])
+    assert save_path.endswith("final_model_with_spaces")
+
+
+def test_train_execution_no_spaces(mocker):
+    mocker.patch("src.train.cfg.use_spaces", False)
+    mocker.patch("src.train.PretokenizedCipherDataset")
+    mock_get_model = mocker.patch("src.train.get_model")
+    mock_trainer = mocker.patch("src.train.Trainer")
+    mock_train_args = mocker.patch("src.train.TrainingArguments")
+    mocker.patch("src.train.os.path.isdir", return_value=False)
+
+    mock_trainer_instance = mocker.Mock()
+    mock_trainer_instance.is_world_process_zero.return_value = True
+    mock_trainer.return_value = mock_trainer_instance
+
+    train()
+
+    mock_get_model.assert_called_once()
+    mock_train_args.assert_called_once()
+    mock_trainer.assert_called_once()
+    mock_trainer_instance.train.assert_called_once_with(resume_from_checkpoint=None)
+    mock_trainer_instance.save_model.assert_called_once()
+    args, _ = mock_trainer_instance.save_model.call_args
+    save_path = str(args[0])
+    assert save_path.endswith("final_model_no_spaces")

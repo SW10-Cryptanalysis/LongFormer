@@ -77,12 +77,6 @@ def test_evaluate_execution(mocker):
         "src.evaluate._generate_tokens", return_value=[100, 101, 102]
     )
 
-    mocker.patch("src.evaluate.cfg.bos_token_id", 0)
-    mocker.patch("src.evaluate.cfg.sep_token_id", 1)
-    mocker.patch("src.evaluate.cfg.eos_token_id", 2)
-    mocker.patch("src.evaluate.cfg.char_offset", 100)
-    mocker.patch("src.evaluate.cfg.max_context", 1000)
-
     mock_logger = mocker.patch("src.evaluate.logger")
 
     evaluate()
