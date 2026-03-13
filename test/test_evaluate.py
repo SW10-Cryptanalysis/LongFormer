@@ -3,20 +3,18 @@ from pathlib import Path
 from src.evaluate import _resolve_model_path, _load_model, _generate_tokens, evaluate
 
 
-def test_resolve_model_path(mocker):
-    mocker.patch("src.evaluate.cfg.output_dir", "dummy/output")
-    mocker.patch("src.evaluate.os.path.exists", return_value=False)
-    mocker.patch("src.evaluate.os.path.isdir", return_value=True)
-    mocker.patch(
-        "src.evaluate.os.listdir",
-        return_value=["checkpoint-100", "checkpoint-500", "other_dir"],
-    )
+def test_resolve_model_path(mocker, tmp_path):
+    mocker.patch("src.evaluate.cfg.output_dir", str(tmp_path))
+
+    (tmp_path / "checkpoint-100").mkdir()
+    (tmp_path / "checkpoint-500").mkdir()
+    (tmp_path / "other_dir").mkdir()
 
     path = _resolve_model_path()
-    assert path == Path("dummy/output/checkpoint-500")
+    assert path == tmp_path / "checkpoint-500"
 
 
-def test_load_model(mocker):
+def test_load_model(mocker, tmp_path):
     mocker.patch("src.evaluate.cfg.dims", 64)
     mocker.patch("src.evaluate.cfg.vocab_size", 128)
 
@@ -25,14 +23,13 @@ def test_load_model(mocker):
     mock_model.bfloat16.return_value = mock_model
     mock_get_model = mocker.patch("src.evaluate.get_model", return_value=mock_model)
 
-    mocker.patch("src.evaluate.os.path.exists", return_value=False)
     mocker.patch(
         "src.evaluate.torch.load", return_value={"embed.weight": torch.randn(128, 64)}
     )
     mocker.patch("src.evaluate.torch.cuda.is_available", return_value=True)
     mocker.patch("src.evaluate.torch.cuda.is_bf16_supported", return_value=True)
 
-    _load_model(Path("dummy/path"), torch.device("cpu"))
+    _load_model(tmp_path, torch.device("cpu"))
 
     mock_get_model.assert_called_once()
     mock_model.load_state_dict.assert_called_once()
@@ -41,9 +38,7 @@ def test_load_model(mocker):
 
 def test_generate_tokens(mocker):
     mock_model = mocker.Mock()
-    # Mocking causal LM output format dictionary
     mock_outputs = {"logits": torch.zeros((1, 1, 128))}
-    # Make the generated token trigger the break condition (eos_token)
     mock_outputs["logits"][0, -1, 99] = 1.0
     mock_model.return_value = mock_outputs
 
@@ -59,7 +54,6 @@ def test_generate_tokens(mocker):
         device=device,
     )
 
-    # Should stop after generating token 99 due to EOS condition
     assert generated == [99]
 
 
@@ -77,7 +71,6 @@ def test_evaluate_execution(mocker):
     mocker.patch("src.evaluate._resolve_model_path", return_value=Path("dummy/path"))
     mocker.patch("src.evaluate._load_model")
 
-    # Inject the statically-typed stub in place of standard Mock()
     mocker.patch("src.evaluate.load_from_disk", return_value=DummyDataset())
 
     mock_generate = mocker.patch(

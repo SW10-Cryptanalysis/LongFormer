@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 import torch
 import Levenshtein
@@ -17,30 +16,28 @@ logger.addHandler(handler)
 
 def _resolve_model_path() -> Path | None:
     """Return the path to the best available model checkpoint, or None if none found."""
-    model_path = cfg.output_dir
-    if not os.path.exists(
-        os.path.join(model_path, "model.safetensors"),
-    ) and os.path.isdir(cfg.output_dir):
+    model_path = Path(cfg.output_dir)
+    if not (model_path / "model.safetensors").exists() and model_path.is_dir():
         checkpoints = [
-            d for d in os.listdir(cfg.output_dir) if d.startswith("checkpoint-")
+            p.name for p in model_path.iterdir() if p.name.startswith("checkpoint-")
         ]
         if not checkpoints:
             return None
         checkpoints.sort(key=lambda x: int(x.split("-")[1]))
-        model_path = Path(os.path.join(cfg.output_dir, checkpoints[-1]))
+        model_path = model_path / checkpoints[-1]
     return model_path
 
 
 def _load_model(model_path: Path, device: torch.device) -> RecurrenceModel:
     """Load model weights from safetensors or pytorch_model.bin into a fresh RecurrenceModel."""
     model = get_model()
-    state_dict_path = os.path.join(model_path, "model.safetensors")
-    if os.path.exists(state_dict_path):
+    state_dict_path = model_path / "model.safetensors"
+    if state_dict_path.exists():
         from safetensors.torch import load_file
 
         state_dict = load_file(state_dict_path)
     else:
-        state_dict_path = os.path.join(model_path, "pytorch_model.bin")
+        state_dict_path = model_path / "pytorch_model.bin"
         state_dict = torch.load(state_dict_path, map_location=device)
 
     clean_state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
