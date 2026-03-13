@@ -13,6 +13,7 @@ set -e
 # Update to your actual Mistral project directory
 PROJECT_DIR=/ceph/project/SW10-CausalLM/LongFormer
 cd $PROJECT_DIR
+export PYTHONPATH=$PROJECT_DIR
 
 # ==============================================================================
 # DYNAMIC AUTO-CHAINING LOGIC
