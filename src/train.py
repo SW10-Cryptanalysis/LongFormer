@@ -7,7 +7,7 @@ from datasets import load_from_disk
 from torch.utils.data import Dataset
 from transformers import Trainer, TrainingArguments, EvalPrediction
 from src.config import cfg
-from src.model import get_model, FLASH_ATTN_AVAILABLE
+from src.model import get_model
 from easy_logging import EasyFormatter
 
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
@@ -145,11 +145,6 @@ def compute_metrics(
 
 def train() -> None:
     model = get_model()
-
-    logger.info(
-        f"Total Model Parameters: {sum(p.numel() for p in model.parameters()):,}",
-    )
-    logger.info(f"Using Flash Attention 2: {FLASH_ATTN_AVAILABLE}")
 
     if cfg.use_spaces:
         logger.info("Using space tokens in training.")
