@@ -1,5 +1,5 @@
 # Custom Causal LM
-Custom causal language model with RoPE, FlashAttention, and optional Liger kernels for solving long homophonic ciphers.
+Custom causal language model with RoPE, FlashAttention, and optional Liger kernels for solving long homophonic substitution ciphers.
 
 ## Usage
 ### Initialization
