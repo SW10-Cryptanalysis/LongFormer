@@ -341,6 +341,51 @@ wheels = [
 ]
 
 [[package]]
+name = "custom-causal-lm"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "accelerate" },
+    { name = "datasets" },
+    { name = "easy-logging-formatter" },
+    { name = "levenshtein" },
+    { name = "liger-kernel", marker = "sys_platform == 'linux'" },
+    { name = "numpy" },
+    { name = "torch", version = "2.2.2", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'" },
+    { name = "torch", version = "2.9.0", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'" },
+    { name = "transformers" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-mock" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "accelerate", specifier = ">=1.12.0" },
+    { name = "datasets", specifier = ">=4.6.0" },
+    { name = "easy-logging-formatter", specifier = ">=0.1.1" },
+    { name = "levenshtein", specifier = ">=0.27.3" },
+    { name = "liger-kernel", marker = "sys_platform == 'linux'", specifier = ">=0.7.0" },
+    { name = "numpy", specifier = ">=2.4.2" },
+    { name = "torch", marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'", specifier = "==2.9.0" },
+    { name = "torch", marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'", specifier = "<2.3.0" },
+    { name = "transformers", specifier = ">=5.2.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-cov", specifier = ">=7.0.0" },
+    { name = "pytest-mock", specifier = ">=3.15.1" },
+    { name = "ruff", specifier = ">=0.15.2" },
+]
+
+[[package]]
 name = "datasets"
 version = "4.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -689,51 +734,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/73/f8/a25ab6549dd80c5055e84f0ee9be6ecf4a7c85ade448110607f4807ab2ef/liger_kernel-0.7.0.tar.gz", hash = "sha256:48c25648974c7d07d47591117b94188d1059999b7fb652e89e8ba50b21183cb3", size = 3780796, upload-time = "2026-02-12T22:01:00.101Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f7/c6/66c6a3c59b53f4cfbfa0c9e8c573c8843fb1d83cf3c2eb79e39109b76c17/liger_kernel-0.7.0-py3-none-any.whl", hash = "sha256:d2185d94362c069f508eb8aff5e7016c6669613265d5702733d674af4c616a56", size = 276512, upload-time = "2026-02-12T22:00:58.565Z" },
-]
-
-[[package]]
-name = "longformer"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "accelerate" },
-    { name = "datasets" },
-    { name = "easy-logging-formatter" },
-    { name = "levenshtein" },
-    { name = "liger-kernel", marker = "sys_platform == 'linux'" },
-    { name = "numpy" },
-    { name = "torch", version = "2.2.2", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'" },
-    { name = "torch", version = "2.9.0", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'" },
-    { name = "transformers" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "pytest-mock" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "accelerate", specifier = ">=1.12.0" },
-    { name = "datasets", specifier = ">=4.6.0" },
-    { name = "easy-logging-formatter", specifier = ">=0.1.1" },
-    { name = "levenshtein", specifier = ">=0.27.3" },
-    { name = "liger-kernel", marker = "sys_platform == 'linux'", specifier = ">=0.7.0" },
-    { name = "numpy", specifier = ">=2.4.2" },
-    { name = "torch", marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'", specifier = "==2.9.0" },
-    { name = "torch", marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'", specifier = "<2.3.0" },
-    { name = "transformers", specifier = ">=5.2.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "pytest-cov", specifier = ">=7.0.0" },
-    { name = "pytest-mock", specifier = ">=3.15.1" },
-    { name = "ruff", specifier = ">=0.15.2" },
 ]
 
 [[package]]

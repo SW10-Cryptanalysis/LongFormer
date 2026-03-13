@@ -147,7 +147,7 @@ def train() -> None:
     model = get_model()
 
     logger.info(
-        f"Total Model Parameters: {sum(p.numel() for p in model.parameters()):,}"
+        f"Total Model Parameters: {sum(p.numel() for p in model.parameters()):,}",
     )
     logger.info(f"Using Flash Attention 2: {FLASH_ATTN_AVAILABLE}")
 
