@@ -1,10 +1,11 @@
 import os
 import torch
 import logging
+import numpy as np
 from pathlib import Path
 from datasets import load_from_disk
 from torch.utils.data import Dataset
-from transformers import Trainer, TrainingArguments
+from transformers import Trainer, TrainingArguments, EvalPrediction
 from src.config import cfg
 from src.model import get_model
 from easy_logging import EasyFormatter
@@ -107,6 +108,41 @@ def varlen_collate(batch: list[dict[str, list[int]]]) -> dict[str, torch.Tensor 
     }
 
 
+def compute_metrics(
+    eval_preds: EvalPrediction | tuple[np.ndarray, np.ndarray],
+) -> dict[str, float]:
+    """Compute symbol error rate (SER) while ignoring padded labels."""
+    if isinstance(eval_preds, tuple):
+        predictions, labels = eval_preds
+    else:
+        predictions = eval_preds.predictions
+        labels = eval_preds.label_ids
+
+    if isinstance(predictions, tuple):
+        predictions = predictions[0]
+    if isinstance(labels, tuple):
+        labels = labels[0]
+
+    if predictions.ndim == 3:
+        predictions = np.argmax(predictions, axis=-1)
+
+    total_errors = 0
+    total_symbols = 0
+
+    for i in range(labels.shape[0]):
+        # Mask out padding (-100)
+        mask = labels[i] != -100
+        val_labels = labels[i][mask]
+        val_preds = predictions[i][mask]
+
+        # Calculate mismatches
+        total_errors += np.sum(val_labels != val_preds)
+        total_symbols += len(val_labels)
+
+    ser = total_errors / total_symbols if total_symbols > 0 else 0.0
+    return {"SER": ser}
+
+
 def train() -> None:
     model = get_model()
 
@@ -145,6 +181,7 @@ def train() -> None:
         args=train_args,
         train_dataset=train_ds,
         eval_dataset=val_ds,
+        compute_metrics=compute_metrics,
         data_collator=varlen_collate,
     )
 
