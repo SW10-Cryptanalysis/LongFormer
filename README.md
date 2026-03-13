@@ -1,5 +1,5 @@
-# LongFormer
-LongFormer model for solving long homophonic substitution ciphers
+# Custom Causal LM
+Custom causal language model with RoPE, FlashAttention, and optional Liger kernels.
 
 ## Usage
 ### Initialization
