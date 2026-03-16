@@ -1,13 +1,22 @@
 import os
-from pathlib import Path
 import torch
+import logging
+import numpy as np
+from pathlib import Path
 from datasets import load_from_disk
 from torch.utils.data import Dataset
-from transformers import Trainer, TrainingArguments
+from transformers import Trainer, TrainingArguments, EvalPrediction
 from src.config import cfg
 from src.model import get_model
+from easy_logging import EasyFormatter
 
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+
+handler = logging.StreamHandler()
+handler.setFormatter(EasyFormatter())
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.addHandler(handler)
 
 
 class PretokenizedCipherDataset(Dataset):
@@ -30,6 +39,14 @@ class PretokenizedCipherDataset(Dataset):
     def __getitem__(self, idx: int) -> dict[str, list[int]]:
         """Return a single sample with input_ids and labels, truncated and stripped of padding."""
         item = self.hf_dataset[idx]
+
+        if (
+            len(item["input_ids"]) > cfg.max_context
+            or len(item["labels"]) > cfg.max_context
+        ):
+            logger.info(
+                f"Sample {idx} truncated: input_ids {len(item['input_ids'])} -> {cfg.max_context}, labels {len(item['labels'])} -> {cfg.max_context}",
+            )
 
         # Enforce Equal Loss Weighting and truncate if necessary
         input_ids = item["input_ids"][: cfg.max_context]
@@ -91,11 +108,54 @@ def varlen_collate(batch: list[dict[str, list[int]]]) -> dict[str, torch.Tensor 
     }
 
 
+def compute_metrics(
+    eval_preds: EvalPrediction | tuple[np.ndarray, np.ndarray],
+) -> dict[str, float]:
+    """Compute symbol error rate (SER) while ignoring padded labels."""
+    if isinstance(eval_preds, tuple):
+        predictions, labels = eval_preds
+    else:
+        predictions = eval_preds.predictions
+        labels = eval_preds.label_ids
+
+    if isinstance(predictions, tuple):
+        predictions = predictions[0]
+    if isinstance(labels, tuple):
+        labels = labels[0]
+
+    if predictions.ndim == 3:
+        predictions = np.argmax(predictions, axis=-1)
+
+    total_errors = 0
+    total_symbols = 0
+
+    for i in range(labels.shape[0]):
+        # Mask out padding (-100)
+        mask = labels[i] != -100
+        val_labels = labels[i][mask]
+        val_preds = predictions[i][mask]
+
+        # Calculate mismatches
+        total_errors += np.sum(val_labels != val_preds)
+        total_symbols += len(val_labels)
+
+    ser = total_errors / total_symbols if total_symbols > 0 else 0.0
+    return {"SER": ser}
+
+
 def train() -> None:
     model = get_model()
 
-    train_ds = PretokenizedCipherDataset(cfg.tokenized_training_dir)
-    test_ds = PretokenizedCipherDataset(cfg.tokenized_test_dir)
+    if cfg.use_spaces:
+        if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+            logger.info("Using space tokens in training.")
+        train_ds = PretokenizedCipherDataset(cfg.tokenized_spaced_train_dir)
+        val_ds = PretokenizedCipherDataset(cfg.tokenized_spaced_val_dir)
+    else:
+        if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+            logger.info("Not using space tokens in training.")
+        train_ds = PretokenizedCipherDataset(cfg.tokenized_training_dir)
+        val_ds = PretokenizedCipherDataset(cfg.tokenized_val_dir)
 
     train_args = TrainingArguments(
         output_dir=str(cfg.output_dir),
@@ -122,7 +182,8 @@ def train() -> None:
         model=model,
         args=train_args,
         train_dataset=train_ds,
-        eval_dataset=test_ds,
+        eval_dataset=val_ds,
+        compute_metrics=compute_metrics,
         data_collator=varlen_collate,
     )
 
@@ -139,8 +200,14 @@ def train() -> None:
 
     trainer.train(resume_from_checkpoint=last_checkpoint)
 
+    final_model_name = "final_model"
+    if cfg.use_spaces:
+        final_model_name += "_with_spaces"
+    else:
+        final_model_name += "_no_spaces"
+
     if trainer.is_world_process_zero():
-        trainer.save_model(os.path.join(str(cfg.output_dir), "final_model"))
+        trainer.save_model(os.path.join(str(cfg.output_dir), final_model_name))
 
 
 if __name__ == "__main__":

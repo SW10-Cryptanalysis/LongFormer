@@ -1,10 +1,18 @@
 import os
 import math
-from typing import cast
+import logging
 import torch
+from typing import cast
 import torch.nn as nn
 import torch.utils.checkpoint as checkpoint
 from src.config import cfg, Config
+from easy_logging import EasyFormatter
+
+handler = logging.StreamHandler()
+handler.setFormatter(EasyFormatter())
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.addHandler(handler)
 
 try:
     from flash_attn import flash_attn_varlen_func  # type: ignore
@@ -346,5 +354,10 @@ def get_model() -> RecurrenceModel:
     """Instantiate and return a RecurrenceModel using the global config."""
     model = RecurrenceModel(cfg)
     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        logger.info(
+            f"Total Model Parameters: {sum(p.numel() for p in model.parameters()):,}",
+        )
+        logger.info(f"Using Flash Attention 2: {FLASH_ATTN_AVAILABLE}")
         pass
+
     return model
