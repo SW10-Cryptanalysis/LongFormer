@@ -1,31 +1,56 @@
 [project]
-name = "longformer"
+name = "custom-causal-lm"
 version = "0.1.0"
-description = "Add your description here"
+description = "Custom causal model for long cipher decoding tasks"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "accelerate>=1.12.0",
-    "torch>=2.10.0",
+    "datasets>=4.6.0",
+    "levenshtein>=0.27.3",
+    "liger-kernel>=0.7.0; sys_platform == 'linux'",
+    "torch==2.9.0; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    "torch<2.3.0; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "transformers>=5.2.0",
-]
-
-[tool.pytest.ini_options]
-pythonpath = ["src"]
-testpaths = ["test"]
-addopts = "-v --tb=short --cov=src --cov-report=term-missing"
-
-[tool.coverage.report]
-exclude_also = [
-	"if 0:",
-    "if __name__ == .__main__.:",
-	"import",
-	"from",
+    "easy-logging-formatter>=0.1.1",
+    "numpy>=2.4.2",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
+    "pytest-mock>=3.15.1",
     "ruff>=0.15.2",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["test"]
+addopts = "-v --tb=short --cov=src --cov-report=term-missing"
+
+[tool.coverage.report]
+exclude_also = [
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "import",
+    "from",
+]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+exclude = ["venv", ".venv", "__pycache__", "build", "dist", ".eggs", "*.egg", ".mypy_cache", ".pytest_cache"]
+select = ["E", "F", "W", "C90", "B", "B9", "ANN", "COM", "D", "ERA", "ISC", "N", "Q000", "S", "SIM", "TID251", "UP", "YTT", "T"]
+ignore = [
+    "ERA001", "S311", "D206", "D100", "D203", "D213", "UP035", "ANN401", "E501", "D401", "D103"
+]
+
+[tool.ruff.lint.per-file-ignores]
+"test/**/*.py" = [
+    "S101", "D", "ANN", "E501", "COM812", "ERA001"
+]
+
+[tool.ruff.format]
+indent-style = "space"
