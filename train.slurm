@@ -15,7 +15,7 @@
 # ==============================================================================
 # DYNAMIC AUTO-CHAINING LOGIC
 # ==============================================================================
-if [ -d "outputs/final_model" ]; then
+if [ -d "outputs/final_model_with_spaces" ]; then
     echo "Success: 'outputs/final_model' found. Training is completely finished."
     echo "Breaking the chain. No further jobs will be submitted."
     exit 0
