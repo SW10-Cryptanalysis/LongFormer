@@ -13,16 +13,22 @@
 # failed (e.g. cluster job-limit reached), silently killing the chain.
 
 # ==============================================================================
-# DYNAMIC AUTO-CHAINING LOGIC
+# DYNAMIC AUTO-CHAINING LOGIC & EXPERIMENT TRACKING
 # ==============================================================================
-if [ -d "outputs/final_model_with_spaces" ]; then
-    echo "Success: 'outputs/final_model' found. Training is completely finished."
+# Parse arguments to match the dynamic output directory in train.py
+EXPECTED_DIR="outputs/final_model_with_spaces"
+if [[ "$*" == *"--without-spaces"* ]]; then
+    EXPECTED_DIR="outputs/final_model_no_spaces"
+fi
+
+if [ -d "$EXPECTED_DIR" ]; then
+    echo "Success: '$EXPECTED_DIR' found. Training is completely finished."
     echo "Breaking the chain. No further jobs will be submitted."
     exit 0
 fi
 
 echo "Dynamically queuing the next 12-hour continuation job with arguments: $@"
-NEXT_JOB_ID=$(sbatch --parsable --dependency=afterok:$SLURM_JOB_ID $0 "$@") || {
+NEXT_JOB_ID=$(sbatch --parsable --dependency=afterany:$SLURM_JOB_ID $0 "$@") || {
     echo "WARNING: Could not submit next chained job (cluster limit reached?)." \
          "Training will still run this slot, but auto-chaining has stopped." \
          "Re-submit manually after this job finishes if training is incomplete."
