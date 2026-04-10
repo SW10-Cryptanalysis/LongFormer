@@ -1,11 +1,20 @@
 import os
 import torch
 import logging
+import transformers
+import time
 import numpy as np
 from pathlib import Path
 from datasets import load_from_disk
 from torch.utils.data import Dataset
-from transformers import Trainer, TrainingArguments, EvalPrediction
+from transformers import (
+    Trainer,
+    TrainingArguments,
+    EvalPrediction,
+    TrainerState,
+    TrainerCallback,
+    set_seed,
+)
 from src.config import cfg
 from src.model import get_model
 from easy_logging import EasyFormatter
@@ -17,6 +26,91 @@ handler.setFormatter(EasyFormatter())
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 logger.addHandler(handler)
+
+
+class HardwareOptimizationCallback(TrainerCallback):
+    """Custom callback for AAU AI-Lab 4-8x L4 GPU performance telemetry."""
+
+    def __init__(self) -> None:
+        """Initialize the callback."""
+        self.epoch_start_time = 0
+
+    def on_epoch_begin(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        control: transformers.TrainerControl,
+        **kwargs,
+    ) -> None:
+        """Log the start time of the epoch."""
+        self.epoch_start_time = time.time()
+        self.epoch_start_step = state.global_step
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+
+    def on_epoch_end(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        control: transformers.TrainerControl,
+        **kwargs,
+    ) -> None:
+        """Log performance metrics at the end of the epoch."""
+        epoch_time = time.time() - self.epoch_start_time
+        steps_this_epoch = state.global_step - self.epoch_start_step
+        num_devices = max(torch.cuda.device_count(), 1)
+
+        # Tokens per second (Approximate based on max context)
+        total_tokens_per_epoch = (
+            steps_this_epoch
+            * args.per_device_train_batch_size
+            * args.gradient_accumulation_steps
+            * cfg.max_len
+            * num_devices
+        )
+        tokens_per_sec = total_tokens_per_epoch / epoch_time if epoch_time > 0 else 0
+
+        # VRAM Tracking (Memory Management)
+        peak_vram_gb = 0.0
+        if torch.cuda.is_available():
+            peak_vram_gb = torch.cuda.max_memory_allocated() / (1024**3)
+
+        logger.info(f"--- Epoch {state.epoch} Performance Metrics ---")
+        logger.info(f"Wall-clock time: {epoch_time:.2f} seconds")
+        logger.info(f"Throughput: {tokens_per_sec:.2f} tokens/sec")
+        logger.info(f"Peak VRAM: {peak_vram_gb:.2f} GB")
+        logger.info(
+            (
+                f"Wall-clock time per 10k-token sample: {(epoch_time / (total_tokens_per_epoch / 10000)):.4f} seconds"
+                if total_tokens_per_epoch > 0
+                else "N/A"
+            ),
+        )
+        logger.info("-" * 40)
+
+
+def log_environment_details(seed: int) -> None:
+    """Logs SOTA Implementation library versions and hardware details."""
+    logger.info("=== AAU AI-Lab Execution Environment ===")
+    logger.info(f"Seed: {seed}")
+    logger.info(f"PyTorch Version: {torch.__version__}")
+    logger.info(f"Transformers Version: {transformers.__version__}")
+    logger.info(f"CUDA Available: {torch.cuda.is_available()}")
+
+    if torch.cuda.is_available():
+        logger.info(f"CUDA Version: {torch.version.cuda}")
+        device_count = torch.cuda.device_count()
+        logger.info(f"GPU Count: {device_count}")
+        for i in range(device_count):
+            logger.info(f"GPU {i}: {torch.cuda.get_device_name(i)}")
+
+    try:
+        import flash_attn  # type: ignore
+
+        logger.info(f"FlashAttention-2 Version: {flash_attn.__version__}")
+    except ImportError:
+        logger.warning("FlashAttention-2 not found. Sequence bottlenecks may occur.")
+    logger.info("========================================")
 
 
 class PretokenizedCipherDataset(Dataset):
@@ -141,6 +235,22 @@ def compute_metrics(
 
 
 def train() -> None:
+    # Safety check
+    if cfg.vocab_size == 0 or cfg.max_len == 0 or cfg.unique_homophones == 0:
+        raise ValueError(
+            f"CRITICAL CONFIG ERROR: dimension was not initialized properly!\n"
+            f"vocab_size: {cfg.vocab_size}\n"
+            f"max_len: {cfg.max_len}\n"
+            f"unique_homophones: {cfg.unique_homophones}\n"
+            f"Check the Config class and load_homophones() method.",
+        )
+
+    # Seed Tracking
+    run_seed = 42
+    set_seed(run_seed)
+
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        log_environment_details(run_seed)
     model = get_model()
 
     if cfg.use_spaces:
@@ -158,21 +268,20 @@ def train() -> None:
         output_dir=str(cfg.output_dir),
         num_train_epochs=cfg.epochs,
         per_device_train_batch_size=cfg.batch_size,
+        per_device_eval_batch_size=cfg.batch_size,
         gradient_accumulation_steps=cfg.grad_accum,
+        eval_accumulation_steps=4,
         learning_rate=cfg.learning_rate,
         weight_decay=0.01,
         bf16=cfg.bf16,
-        logging_steps=cfg.log_steps,
+        logging_steps=cfg.logging_steps,
         save_steps=cfg.save_steps,
         eval_steps=cfg.eval_steps,
         save_total_limit=cfg.save_total_limit,
+        eval_strategy="steps",
+        torch_compile=cfg.torch_compile,
         dataloader_num_workers=8,
-        dataloader_pin_memory=True,
-        fsdp="full_shard auto_wrap",
-        fsdp_config={
-            "transformer_layer_cls_to_wrap": ["CustomLayer"],
-            "activation_checkpointing": cfg.grad_checkpoint,
-        },
+        seed=run_seed,
     )
 
     trainer = Trainer(
@@ -180,8 +289,9 @@ def train() -> None:
         args=train_args,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        compute_metrics=compute_metrics,
         data_collator=varlen_collate,
+        compute_metrics=compute_metrics,
+        callbacks=[HardwareOptimizationCallback()],
     )
 
     last_checkpoint = None

@@ -21,6 +21,9 @@ parser.add_argument(
 )
 cli_args, _ = parser.parse_known_args()
 
+MAX_PLAIN_SPACES = 13077
+MAX_PLAIN_NORMAL = 10063
+
 DATA_DIR = Path(__file__).parent.parent.parent / "Ciphers"
 OUTPUT_DIR = Path(__file__).parent.parent / "outputs"
 HOMOPHONE_FILE = "metadata.json"
@@ -39,21 +42,18 @@ TOKENIZED_SPACED_TEST_DIR = DATA_DIR / "tokenized_spaced" / "Test"
 class Config:
     """Configuration dataclass for model architecture, training, and system paths."""
 
-    buffer: int = 5
-
     # ARCHITECTURE
-    unique_homophones: int = 2503
+    buffer: int = 10
     unique_letters: int = 26
-    vocab_size: int = 2560  # Padded to multiple of 64
+    unique_homophones: int = 0
+    vocab_size: int = 0
 
     @property
     def max_len(self) -> int:
-        """Max len based on with or without spaces"""
-        return (
-            13077 * 2 + 10 + self.buffer
-            if self.use_spaces
-            else 10063 * 2 + 10 + self.buffer
-        )
+        """Calculate dynamic variables after the dataclass is initialized."""
+        if self.use_spaces:
+            return (MAX_PLAIN_SPACES * 2) + self.buffer
+        return (MAX_PLAIN_NORMAL * 2) + self.buffer
 
     # Custom Arch
     dims: int = 512
@@ -85,8 +85,10 @@ class Config:
     log_steps: int = 10
     save_steps: int = 500
     eval_steps: int = 1000
+    logging_steps: int = 10
     save_total_limit: int = 2
     use_spaces: bool = not cli_args.without_spaces
+    torch_compile: bool = False
 
     # SYSTEM
     output_dir: Path = OUTPUT_DIR
@@ -127,20 +129,23 @@ class Config:
 
     def load_homophones(self) -> None:
         """Load homophone mappings from the metadata file."""
-        homophone_path = Path(DATA_DIR, HOMOPHONE_FILE)
-        if os.path.exists(homophone_path):
-            try:
-                with open(homophone_path) as f:
-                    meta = json.load(f)
-                    self.unique_homophones = int(meta["max_symbol_id"])
-            except OSError as e:
-                logger.warning("Could not read file: %s", HOMOPHONE_FILE)
-                logger.warning("Using default value: %d", self.unique_homophones)
-                logger.warning("Error details: %s", str(e))
-            except (ValueError, KeyError) as e:
-                logger.warning("Invalid or missing data in: %s", HOMOPHONE_FILE)
-                logger.warning("Using default value: %d", self.unique_homophones)
-                logger.warning("Error details: %s", str(e))
+        homophone_path = os.path.join(DATA_DIR, HOMOPHONE_FILE)
+        if not os.path.exists(homophone_path):
+            raise FileNotFoundError(
+                f"Metadata file not found at: {homophone_path}. "
+                "Cannot determine unique_homophones — aborting.",
+                1,
+            )
+        try:
+            with open(homophone_path) as f:
+                meta = json.load(f)
+                self.unique_homophones = int(meta["max_symbol_id"])
+        except OSError as e:
+            raise OSError(f"Could not read file: {homophone_path}") from e
+        except (ValueError, KeyError) as e:
+            raise ValueError(
+                f"Invalid or missing 'max_symbol_id' in {homophone_path}",
+            ) from e
 
         raw = self.unique_homophones + self.unique_letters + self.buffer
         self.vocab_size = (
