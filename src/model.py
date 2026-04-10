@@ -318,7 +318,7 @@ class RecurrenceModel(nn.Module):
             x.requires_grad_(True)
 
         if max_seqlen is None:
-            max_seqlen = self.config.max_context
+            max_seqlen = self.config.max_len
 
         cos, sin = (None, None)
         if pos_ids is not None:

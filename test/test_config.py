@@ -10,7 +10,7 @@ def test_config_instance_types():
     assert isinstance(cfg.unique_homophones, int)
     assert isinstance(cfg.unique_letters, int)
     assert isinstance(cfg.vocab_size, int)
-    assert isinstance(cfg.max_context, int)
+    assert isinstance(cfg.max_len, int)
     assert isinstance(cfg.dims, int)
     assert isinstance(cfg.layers, int)
     assert isinstance(cfg.att_heads, int)

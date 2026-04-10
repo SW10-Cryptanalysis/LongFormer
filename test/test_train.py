@@ -17,7 +17,7 @@ def test_pretokenized_cipher_dataset(mocker, mock_dataset_data):
 
     # Mock the global config padding logic
     mocker.patch("src.train.cfg.pad_token_id", 0)
-    mocker.patch("src.train.cfg.max_context", 100)
+    mocker.patch("src.train.cfg.max_len", 100)
 
     ds = PretokenizedCipherDataset(Path("dummy/path"))
     assert len(ds) == 2

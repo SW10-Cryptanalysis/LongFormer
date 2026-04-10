@@ -125,7 +125,7 @@ def evaluate() -> None:
         cipher_ids = [int(x) for x in item["ciphertext"].split()]
         true_plain = item["plaintext"]
 
-        max_cipher_len = cfg.max_context - 200
+        max_cipher_len = cfg.max_len - 200
         if len(cipher_ids) > max_cipher_len:
             cipher_ids = cipher_ids[:max_cipher_len]
 

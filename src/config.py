@@ -21,11 +21,6 @@ parser.add_argument(
 )
 cli_args, _ = parser.parse_known_args()
 
-# Context sizing for Ciphers based on provided metadata
-TEXT_LEN = 9961
-TOTAL_SEQ = TEXT_LEN * 2
-BUFFER = 178
-
 DATA_DIR = Path(__file__).parent.parent.parent / "Ciphers"
 OUTPUT_DIR = Path(__file__).parent.parent / "outputs"
 HOMOPHONE_FILE = "metadata.json"
@@ -44,11 +39,21 @@ TOKENIZED_SPACED_TEST_DIR = DATA_DIR / "tokenized_spaced" / "Test"
 class Config:
     """Configuration dataclass for model architecture, training, and system paths."""
 
+    buffer: int = 5
+
     # ARCHITECTURE
-    unique_homophones: int = 2494
+    unique_homophones: int = 2503
     unique_letters: int = 26
     vocab_size: int = 2560  # Padded to multiple of 64
-    max_context: int = TOTAL_SEQ + BUFFER  # 20100
+
+    @property
+    def max_len(self) -> int:
+        """Max len based on with or without spaces"""
+        return (
+            13077 * 2 + 10 + self.buffer
+            if self.use_spaces
+            else 10063 * 2 + 10 + self.buffer
+        )
 
     # Custom Arch
     dims: int = 512
@@ -137,10 +142,17 @@ class Config:
                 logger.warning("Using default value: %d", self.unique_homophones)
                 logger.warning("Error details: %s", str(e))
 
-        raw = self.unique_homophones + self.unique_letters + BUFFER
+        raw = self.unique_homophones + self.unique_letters + self.buffer
         self.vocab_size = (
             (raw + 63) // 64 * 64
         )  # Padded to nearest multiple of 64 for L4 Ada Lovelace Tensor Cores
+        logger.info(
+            f"Config initialized: unique_homophones={self.unique_homophones}, sep_token_id={self.sep_token_id}, space_token_id={self.space_token_id}, bos_token_id={self.bos_token_id}, eos_token_id={self.eos_token_id}, char_offset={self.char_offset}, vocab_size={self.vocab_size}",
+        )
+        logger.info(
+            f"Max len set to {self.max_len} based on use_spaces={self.use_spaces}"
+        )
 
 
 cfg = Config()
+cfg.load_homophones()

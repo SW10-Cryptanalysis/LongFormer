@@ -40,17 +40,14 @@ class PretokenizedCipherDataset(Dataset):
         """Return a single sample with input_ids and labels, truncated and stripped of padding."""
         item = self.hf_dataset[idx]
 
-        if (
-            len(item["input_ids"]) > cfg.max_context
-            or len(item["labels"]) > cfg.max_context
-        ):
+        if len(item["input_ids"]) > cfg.max_len or len(item["labels"]) > cfg.max_len:
             logger.info(
-                f"Sample {idx} truncated: input_ids {len(item['input_ids'])} -> {cfg.max_context}, labels {len(item['labels'])} -> {cfg.max_context}",
+                f"Sample {idx} truncated: input_ids {len(item['input_ids'])} -> {cfg.max_len}, labels {len(item['labels'])} -> {cfg.max_len}",
             )
 
         # Enforce Equal Loss Weighting and truncate if necessary
-        input_ids = item["input_ids"][: cfg.max_context]
-        labels = item["labels"][: cfg.max_context]
+        input_ids = item["input_ids"][: cfg.max_len]
+        labels = item["labels"][: cfg.max_len]
 
         # This prevents the Tensor Cores from wasting FLOPs on padding logic
         valid_lengths = [
