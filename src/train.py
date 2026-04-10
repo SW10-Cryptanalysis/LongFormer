@@ -270,6 +270,7 @@ def train() -> None:
         per_device_train_batch_size=cfg.batch_size,
         per_device_eval_batch_size=cfg.batch_size,
         gradient_accumulation_steps=cfg.grad_accum,
+        gradient_checkpointing=cfg.grad_checkpoint,
         eval_accumulation_steps=4,
         learning_rate=cfg.learning_rate,
         weight_decay=0.01,
@@ -281,6 +282,7 @@ def train() -> None:
         eval_strategy="steps",
         torch_compile=cfg.torch_compile,
         dataloader_num_workers=8,
+        ddp_find_unused_parameters=False,
         seed=run_seed,
     )
 

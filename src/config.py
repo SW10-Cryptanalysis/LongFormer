@@ -77,8 +77,8 @@ class Config:
         return self.dims * 4
 
     # TRAINING
-    batch_size: int = 2
-    grad_accum: int = 16
+    batch_size: int = 4
+    grad_accum: int = 8
     learning_rate: float = 2e-4
     epochs: int = 3
     grad_checkpoint: bool = True
