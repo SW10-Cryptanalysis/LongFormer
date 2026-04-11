@@ -89,6 +89,23 @@ class HardwareOptimizationCallback(TrainerCallback):
         logger.info("-" * 40)
 
 
+class VarlenTrainer(Trainer):
+    def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
+        """Override to argmax logits on-device before CPU offload."""
+        with torch.no_grad():
+            outputs = model(**inputs)
+
+        loss = outputs["loss"]
+        logits = outputs.get("logits")
+
+        if logits is not None:
+            # Argmax on GPU — cheap, avoids offloading full float logits
+            logits = logits.argmax(dim=-1)
+
+        labels = inputs.get("labels")
+        return (loss, logits, labels)
+
+
 def log_environment_details(seed: int) -> None:
     """Logs SOTA Implementation library versions and hardware details."""
     logger.info("=== AAU AI-Lab Execution Environment ===")
@@ -214,19 +231,13 @@ def compute_metrics(
     if isinstance(labels, tuple):
         labels = labels[0]
 
-    if predictions.ndim == 3:
-        predictions = np.argmax(predictions, axis=-1)
-
     total_errors = 0
     total_symbols = 0
 
     for i in range(labels.shape[0]):
-        # Mask out padding (-100)
         mask = labels[i] != -100
         val_labels = labels[i][mask]
         val_preds = predictions[i][mask]
-
-        # Calculate mismatches
         total_errors += np.sum(val_labels != val_preds)
         total_symbols += len(val_labels)
 
@@ -268,10 +279,10 @@ def train() -> None:
         output_dir=str(cfg.output_dir),
         num_train_epochs=cfg.epochs,
         per_device_train_batch_size=cfg.batch_size,
-        per_device_eval_batch_size=cfg.batch_size,
+        per_device_eval_batch_size=1,
         gradient_accumulation_steps=cfg.grad_accum,
         gradient_checkpointing=cfg.grad_checkpoint,
-        eval_accumulation_steps=4,
+        eval_accumulation_steps=1,
         learning_rate=cfg.learning_rate,
         weight_decay=0.01,
         bf16=cfg.bf16,
@@ -286,7 +297,7 @@ def train() -> None:
         seed=run_seed,
     )
 
-    trainer = Trainer(
+    trainer = VarlenTrainer(
         model=model,
         args=train_args,
         train_dataset=train_ds,
