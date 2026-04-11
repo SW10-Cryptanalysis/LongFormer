@@ -343,11 +343,14 @@ class RecurrenceModel(nn.Module):
         if not self.training:
             logits = self._compute_logits(x).unsqueeze(0)
 
-        return {
+        result: dict[str, torch.Tensor | None] = {
             "loss": loss,
             "logits": logits,
-            "hidden_states": x.unsqueeze(0) if output_hidden_states else None,
         }
+
+        if output_hidden_states:
+            result["hidden_states"] = x.unsqueeze(0)
+        return result
 
 
 def get_model() -> RecurrenceModel:
