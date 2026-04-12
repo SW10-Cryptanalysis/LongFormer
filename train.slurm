@@ -53,6 +53,12 @@ export OMP_NUM_THREADS=8
 export NCCL_DEBUG=INFO
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 
+mkdir -p "$PWD/custom_tmp"
+export TMPDIR="$PWD/custom_tmp"
+export TEMP="$PWD/custom_tmp"
+export TMP="$PWD/custom_tmp"
+export UV_CACHE_DIR="$PWD/custom_tmp/.uv_cache"
+
 uv pip install -e .
 uv pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
 
